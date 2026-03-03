@@ -108,6 +108,21 @@ try {
     $GPUUsage = [Math]::Round($GPU.Sum, 1)
 } catch { $GPUUsage = 0 }
 
+# DETEKSI SUHU (Thermal Zone)
+try {
+    # Mencoba mengambil suhu dari MSAcpi_ThermalZoneTemperature (Dalam satuan Kelvin x 10)
+    $TZone = Get-CimInstance -Namespace "root\wmi" -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue
+    if ($TZone) {
+        # Konversi Kelvin ke Celsius: (Kelvin / 10) - 273.15
+        $TempCelsius = [Math]::Round(($TZone.CurrentTemperature / 10) - 273.15, 1)
+        $CPUTemp = "$TempCelsius °C"
+    } else {
+        $CPUTemp = "Locked/Unsupported"
+    }
+} catch {
+    $CPUTemp = "N/A"
+}
+
 # --- DATA LOKASI ---
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Device -ErrorAction SilentlyContinue
@@ -160,7 +175,7 @@ if (!$Location.IsUnknown) {
                "👤 *User:* $User`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
                "📊 *RESOURCE USAGE:*`n" +
-               "🔹 *CPU:* $CPU %`n" +
+               "🔹 *CPU:* $CPU % ($CPUTemp)`n" +
                "🔹 *RAM:* $RAMUsage %`n" +
                "🔹 *Disk:* $DiskUsage %`n" +
                "🔹 *Network:* $NetUsage Kbps`n" +
@@ -185,5 +200,6 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
