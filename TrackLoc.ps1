@@ -110,28 +110,26 @@ try {
 
 # DETEKSI SUHU (Thermal Zone)
 try {
-    # Jalur 1: MSAcpi (Standard WMI)
-    $TZone = Get-CimInstance -Namespace "root\wmi" -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue
+    # Jalur A: Performance Counter (Sering berhasil di laptop yang WMI-nya terkunci)
+    $PFCounter = Get-Counter '\Thermal Zone Information(*)\Temperature' -ErrorAction SilentlyContinue
     
-    # Jalur 2: Win32_TemperatureProbe (Hardware Sensors)
-    $TProbe = Get-CimInstance -ClassName Win32_TemperatureProbe -ErrorAction SilentlyContinue
-
-    if ($TZone) {
-        $TempCelsius = [Math]::Round(($TZone.CurrentTemperature / 10) - 273.15, 1)
+    if ($PFCounter) {
+        # Ambil nilai pertama, konversi dari Kelvin ke Celsius
+        $RawTemp = $PFCounter.CounterSamples[0].CookedValue
+        # Satuan counter ini biasanya Kelvin
+        if ($RawTemp -gt 200) { $TempCelsius = [Math]::Round($RawTemp - 273.15, 1) }
+        else { $TempCelsius = $RawTemp } # Jika sudah dalam Celsius
         $CPUTemp = "$TempCelsius °C"
     } 
-    elseif ($TProbe -and $TProbe.CurrentReading -gt 0) {
-        # Beberapa sensor menggunakan satuan 0.1 derajat Celsius
-        $TempCelsius = if ($TProbe.CurrentReading -gt 1000) { ($TProbe.CurrentReading / 10) } else { $TProbe.CurrentReading }
-        $CPUTemp = "$([Math]::Round($TempCelsius, 1)) °C (Probe)"
-    }
     else {
-        # Jalur 3: Jalur Storage (Disk Temperature) sebagai proksi suhu sistem
-        $DiskTemp = Get-StorageSubSystem | Get-StorageHealthReport -ErrorAction SilentlyContinue
-        if ($DiskTemp.Temperature -gt 0) {
-            $CPUTemp = "$($DiskTemp.Temperature) °C (Disk)"
+        # Jalur B: Akses lewat CIM Storage (Suhu Controller)
+        $StorageTemp = Get-CimInstance -Namespace root\microsoft\windows\storage -ClassName MSFT_PhysicalDisk -ErrorAction SilentlyContinue | 
+                       Select-Object -ExpandProperty Temperature -ErrorAction SilentlyContinue
+        
+        if ($StorageTemp -and $StorageTemp -gt 0) {
+            $CPUTemp = "$StorageTemp °C (Storage)"
         } else {
-            $CPUTemp = "Locked"
+            $CPUTemp = "Not Available"
         }
     }
 } catch {
@@ -215,6 +213,7 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
 
