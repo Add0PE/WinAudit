@@ -110,14 +110,29 @@ try {
 
 # DETEKSI SUHU (Thermal Zone)
 try {
-    # Mencoba mengambil suhu dari MSAcpi_ThermalZoneTemperature (Dalam satuan Kelvin x 10)
+    # Jalur 1: MSAcpi (Standard WMI)
     $TZone = Get-CimInstance -Namespace "root\wmi" -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue
+    
+    # Jalur 2: Win32_TemperatureProbe (Hardware Sensors)
+    $TProbe = Get-CimInstance -ClassName Win32_TemperatureProbe -ErrorAction SilentlyContinue
+
     if ($TZone) {
-        # Konversi Kelvin ke Celsius: (Kelvin / 10) - 273.15
         $TempCelsius = [Math]::Round(($TZone.CurrentTemperature / 10) - 273.15, 1)
         $CPUTemp = "$TempCelsius °C"
-    } else {
-        $CPUTemp = "Locked/Unsupported"
+    } 
+    elseif ($TProbe -and $TProbe.CurrentReading -gt 0) {
+        # Beberapa sensor menggunakan satuan 0.1 derajat Celsius
+        $TempCelsius = if ($TProbe.CurrentReading -gt 1000) { ($TProbe.CurrentReading / 10) } else { $TProbe.CurrentReading }
+        $CPUTemp = "$([Math]::Round($TempCelsius, 1)) °C (Probe)"
+    }
+    else {
+        # Jalur 3: Jalur Storage (Disk Temperature) sebagai proksi suhu sistem
+        $DiskTemp = Get-StorageSubSystem | Get-StorageHealthReport -ErrorAction SilentlyContinue
+        if ($DiskTemp.Temperature -gt 0) {
+            $CPUTemp = "$($DiskTemp.Temperature) °C (Disk)"
+        } else {
+            $CPUTemp = "Locked"
+        }
     }
 } catch {
     $CPUTemp = "N/A"
@@ -200,6 +215,7 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
 
