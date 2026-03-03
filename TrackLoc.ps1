@@ -108,33 +108,9 @@ try {
     $GPUUsage = [Math]::Round($GPU.Sum, 1)
 } catch { $GPUUsage = 0 }
 
-# DETEKSI SUHU (Thermal Zone)
-try {
-    # Jalur A: Performance Counter (Sering berhasil di laptop yang WMI-nya terkunci)
-    $PFCounter = Get-Counter '\Thermal Zone Information(*)\Temperature' -ErrorAction SilentlyContinue
-    
-    if ($PFCounter) {
-        # Ambil nilai pertama, konversi dari Kelvin ke Celsius
-        $RawTemp = $PFCounter.CounterSamples[0].CookedValue
-        # Satuan counter ini biasanya Kelvin
-        if ($RawTemp -gt 200) { $TempCelsius = [Math]::Round($RawTemp - 273.15, 1) }
-        else { $TempCelsius = $RawTemp } # Jika sudah dalam Celsius
-        $CPUTemp = "$TempCelsius °C"
-    } 
-    else {
-        # Jalur B: Akses lewat CIM Storage (Suhu Controller)
-        $StorageTemp = Get-CimInstance -Namespace root\microsoft\windows\storage -ClassName MSFT_PhysicalDisk -ErrorAction SilentlyContinue | 
-                       Select-Object -ExpandProperty Temperature -ErrorAction SilentlyContinue
-        
-        if ($StorageTemp -and $StorageTemp -gt 0) {
-            $CPUTemp = "$StorageTemp °C (Storage)"
-        } else {
-            $CPUTemp = "Not Available"
-        }
-    }
-} catch {
-    $CPUTemp = "N/A"
-}
+# Menghitung Uptime (Sudah berapa lama laptop menyala)
+$Uptime = (Get-Date) - $OS.LastBootUpTime
+$UptimeString = "{0} Hari, {1} Jam, {2} Menit" -f $Uptime.Days, $Uptime.Hours, $Uptime.Minutes
 
 # --- DATA LOKASI ---
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -188,11 +164,12 @@ if (!$Location.IsUnknown) {
                "👤 *User:* $User`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
                "📊 *RESOURCE USAGE:*`n" +
-               "🔹 *CPU:* $CPU % ($CPUTemp)`n" +
+               "🔹 *CPU:* $CPU % `n" +
                "🔹 *RAM:* $RAMUsage %`n" +
                "🔹 *Disk:* $DiskUsage %`n" +
                "🔹 *Network:* $NetUsage Kbps`n" +
                "🔹 *GPU:* $GPUUsage %`n" +
+               "🔹 *Uptime:* $UptimeString`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
                "⚙️ *PM STATUS:*`n" +
                "🛡️ *AV:* $AVName`n" +
@@ -213,6 +190,7 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
 
