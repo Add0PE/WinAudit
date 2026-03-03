@@ -109,6 +109,7 @@ try {
 } catch { $GPUUsage = 0 }
 
 # Menghitung Uptime (Sudah berapa lama laptop menyala)
+$OS = Get-CimInstance Win32_OperatingSystem
 $Uptime = (Get-Date) - $OS.LastBootUpTime
 $UptimeString = "{0} Hari, {1} Jam, {2} Menit" -f $Uptime.Days, $Uptime.Hours, $Uptime.Minutes
 
@@ -190,6 +191,7 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
 
