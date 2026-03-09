@@ -177,7 +177,7 @@ if (!$Location.IsUnknown) {
                "📅 *AV Update:* $LastAVUpdate`n" +
                "🔄 *Win Update:* $LastWinUpdate`n" +
                "🧹 *Last Defrag:* $LastDefrag`n" +
-               "🎯 *Akurasi:* $($Acc) meter`n" +
+               "🎯 *Location Accuracy:* $($Acc) meter`n" +
                "⏰ *Report Sent:* $Timestamp`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
                "🔗 [Device location]($MapsLink)"
@@ -191,6 +191,7 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
 
