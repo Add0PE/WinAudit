@@ -180,7 +180,7 @@ if (!$Location.IsUnknown) {
                "🎯 *Akurasi:* $($Acc) meter`n" +
                "⏰ *Report Sent:* $Timestamp`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
-               "🔗 [Lihat di Google Maps]($MapsLink)"
+               "🔗 [Device location]($MapsLink)"
 
     try {
         $Payload = @{ chat_id = $TelegramChatID; text = $Message; parse_mode = "Markdown" }
@@ -191,6 +191,7 @@ if (!$Location.IsUnknown) {
 }
 
 $Watcher.Stop()
+
 
 
 
