@@ -98,6 +98,16 @@ $RAMUsage = [Math]::Round((($TotalRAM - $FreeRAM) / $TotalRAM) * 100, 1)
 $DiskUsage = [Math]::Round((Get-Counter '\LogicalDisk(C:)\% Disk Time' -MaxSamples 1).CounterSamples.CookedValue, 1)
 if ($DiskUsage -gt 100) { $DiskUsage = 100 }
 
+# Tambahan: Kapasitas Baterai
+try {
+    $Battery = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
+    if ($Battery) {
+        $BatLevel = "$($Battery.EstimatedChargeRemaining)%"
+        $Status = if ($Battery.BatteryStatus -eq 2) { "🔌 Charging" } else { "🔋 Discharging" }
+        $BatteryString = "$BatLevel ($Status)"
+    } else { $BatteryString = "Desktop (No Battery)" }
+} catch { $BatteryString = "N/A" }
+
 # Network Usage (Kbps)
 $Net = Get-Counter '\Network Interface(*)\Bytes Total/sec' -ErrorAction SilentlyContinue
 $NetUsage = [Math]::Round(($Net.CounterSamples.CookedValue | Measure-Object -Sum).Sum / 1KB, 1)
@@ -168,6 +178,7 @@ if (!$Location.IsUnknown) {
                "🔹 *CPU:* $CPU % `n" +
                "🔹 *RAM:* $RAMUsage %`n" +
                "🔹 *Disk:* $DiskUsage %`n" +
+               "🔹 *Battery:* $BatteryString`n" +
                "🔹 *Network:* $NetUsage Kbps`n" +
                "🔹 *GPU:* $GPUUsage %`n" +
                "🔹 *Uptime:* $UptimeString`n" +
