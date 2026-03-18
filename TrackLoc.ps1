@@ -175,13 +175,13 @@ if (!$Location.IsUnknown) {
                "👤 *User:* $User`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
                "📊 *RESOURCE USAGE:*`n" +
-               "🔹 *CPU:* $CPU % `n" +
-               "🔹 *RAM:* $RAMUsage %`n" +
-               "🔹 *Disk:* $DiskUsage %`n" +
-               "🔹 *Battery:* $BatteryString`n" +
-               "🔹 *Network:* $NetUsage Kbps`n" +
-               "🔹 *GPU:* $GPUUsage %`n" +
-               "🔹 *Uptime:* $UptimeString`n" +
+               "📟 *CPU:* $CPU % `n" +
+               "⚡ *RAM:* $RAMUsage %`n" +
+               "📁 *Disk:* $DiskUsage %`n" +
+               "🔋 *Battery:* $BatteryString`n" +
+               "📶 *Network:* $NetUsage Kbps`n" +
+               "🎨 *GPU:* $GPUUsage %`n" +
+               "⏱️ *Uptime:* $UptimeString`n" +
                "━━━━━━━━━━━━━━━━━━`n" +
                "⚙️ *PM STATUS:*`n" +
                "🛡️ *AV:* $AVName`n" +
