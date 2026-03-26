@@ -108,6 +108,27 @@ try {
     } else { $BatteryString = "Desktop (No Battery)" }
 } catch { $BatteryString = "N/A" }
 
+# --- CEK KAPASITAS DISK (C, D, E) ---
+$DiskReport = ""
+$TargetDrives = "C:", "D:", "E:"
+
+foreach ($DriveLetter in $TargetDrives) {
+    try {
+        $Disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$DriveLetter'" -ErrorAction SilentlyContinue
+        if ($Disk) {
+            $FreeGB = [Math]::Round($Disk.FreeSpace / 1GB, 1)
+            $TotalGB = [Math]::Round($Disk.Size / 1GB, 1)
+            $PercentFree = [Math]::Round(($Disk.FreeSpace / $Disk.Size) * 100, 1)
+            
+            # Menentukan Ikon berdasarkan sisa kapasitas
+            $Icon = if ($PercentFree -lt 10) { "🔴" } else { "🟢" }
+            $DiskReport += "$Icon *$DriveLetter* $FreeGB GB / $TotalGB GB ($PercentFree%)`n"
+        }
+    } catch {
+        # Jika drive tidak ada (misal laptop tidak punya D atau E), biarkan kosong
+    }
+}
+
 # Network Usage (Kbps)
 $Net = Get-Counter '\Network Interface(*)\Bytes Total/sec' -ErrorAction SilentlyContinue
 $NetUsage = [Math]::Round(($Net.CounterSamples.CookedValue | Measure-Object -Sum).Sum / 1KB, 1)
@@ -182,6 +203,9 @@ if (!$Location.IsUnknown) {
                "📶 *Network:* $NetUsage Kbps`n" +
                "🎨 *GPU:* $GPUUsage %`n" +
                "⏱️ *Uptime:* $UptimeString`n" +
+               "━━━━━━━━━━━━━━━━━━`n" +
+               "💾 *STORAGE STATUS:*`n" +
+                $DiskReport +
                "━━━━━━━━━━━━━━━━━━`n" +
                "⚙️ *PM STATUS:*`n" +
                "🛡️ *AV:* $AVName`n" +
