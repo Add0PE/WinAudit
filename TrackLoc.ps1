@@ -56,7 +56,7 @@ $NetUsage = [Math]::Round(((Get-Counter '\Network Interface(*)\Bytes Total/sec' 
 try { $GPUUsage = [Math]::Round(((Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction SilentlyContinue).CounterSamples.CookedValue | Measure-Object -Sum).Sum, 1) } catch { $GPUUsage = 0 }
 
 # 2. LOGIKA BATTERY HEALTH
-$BatteryString = "Desktop / N/A"
+$BatteryString = "PC Desktop / (No Battery)"
 $ReportPath = "$env:TEMP\bat_audit.html"
 try {
     powercfg /batteryreport /output $ReportPath | Out-Null
@@ -75,8 +75,8 @@ try {
             $BatteryString = "$Level ($Status)`n   └ Health: $Health% ($FVal / $DVal mWh)"
         }
         Remove-Item $ReportPath -Force -ErrorAction SilentlyContinue
- } else { $BatteryString = "Desktop (No Battery)" }
-} catch { $BatteryString = "N/A" }
+}
+} catch { $BatteryString = "Error Reading" }
 
 # 3. Storage Status
 $DiskReport = ""
