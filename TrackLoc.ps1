@@ -72,7 +72,7 @@ try {
             $BatCIM = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
             $Level = if ($BatCIM) { "$($BatCIM.EstimatedChargeRemaining)%" } else { "---" }
             $Status = if ($BatCIM.BatteryStatus -eq 2) { "🔌 Charging" } else { "🔋 Discharging" }
-            $BatteryString = "$Level ($Status)`n   └ Health: $Health% ($FullCap / $DesignCap mWh)"
+            $BatteryString = "$Level ($Status)`n   └ Health: $Health% ($FVal / $DVal mWh)"
         }
         Remove-Item $ReportPath -Force -ErrorAction SilentlyContinue
  } else { $BatteryString = "Desktop (No Battery)" }
@@ -127,12 +127,10 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "👤 *User:* $User`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "📊 *RESOURCE USAGE:*`n" +
-           "📟 *CPU:* $CPU % `n" +
-           "⚡ *RAM:* $RAMUsage %`n" +
-           "📁 *Disk:* $DiskUsage %`n" +
+           "📟 *CPU:* $CPU % | ⚡ *RAM:* $RAMUsage %`n" +
+           "📁 *Disk:* $DiskUsage % | 🎨 *GPU:* $GPUUsage %`n" +
            "🔋 *Battery:* $BatteryString`n" +
            "📶 *Network:* $NetUsage Kbps`n" +
-           "🎨 *GPU:* $GPUUsage %`n" +
            "⏱️ *Uptime:* $UptimeString`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💾 *SPACE STORAGE STATUS:*`n$DiskReport" +
