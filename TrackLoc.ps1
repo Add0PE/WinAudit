@@ -1,4 +1,4 @@
-﻿# --- KONFIGURASI TELEGRAM ---
+# --- KONFIGURASI TELEGRAM ---
 $TelegramToken = "8717446156:AAGhWMtcY1HgArk-aVZCEXj1aco7E6FEBhY"
 $TelegramChatID = "1229343863"
 
@@ -221,7 +221,7 @@ if (!$Location.IsUnknown) {
         $Payload = @{ chat_id = $TelegramChatID; text = $Message; parse_mode = "Markdown" }
         Invoke-RestMethod -Uri "https://api.telegram.org/bot$($TelegramToken)/sendMessage" -Method Post -Body $Payload -TimeoutSec 5
     } catch {
-        "[$Timestamp] Telegram Send Error" | Out-File -FilePath $LogFile -Append
+        "[$Timestamp] Telegram Send Error"
     }
 }
 
