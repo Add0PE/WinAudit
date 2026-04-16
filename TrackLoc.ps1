@@ -104,7 +104,7 @@ try {
 
 # F. Disk Report
 $DiskReport = ""
-foreach ($Drive in "C:", "D:", "E:") {
+foreach ($Drive in "C:", "D:", "E:" , "F:", "G:") {
     $D = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='$Drive'" -ErrorAction SilentlyContinue
     if ($D) {
         $P = [Math]::Round(($D.FreeSpace / $D.Size) * 100, 1)
