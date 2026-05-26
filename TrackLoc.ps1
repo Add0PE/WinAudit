@@ -153,15 +153,16 @@ $CurrentActivity = "Idle / No Active Window"
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Ambil semua proses, kecualikan proses core OS Windows secara ketat
+# 1. Ambil semua proses, perkecil ruang lingkup HANYA pada proses yang memiliki deskripsi/komponen user
+    # Tambahkan pola pemblokiran untuk "Memory Compression", "WmiPrvSE", dan komponen sistem lainnya
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost)$" 
+        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*)$" 
     }
 
     # 2. Periksa aktivitas proses
     foreach ($Proc in $AllProcesses) {
         try {
-            # JALUR UTAMA: Jika dijalankan di session user, handle jendela akan terdeteksi
+            # JALUR UTAMA: Jika dijalankan di session user yang aktif
             $HasWindow = $Proc.MainWindowHandle
             $Title = $Proc.MainWindowTitle
 
@@ -173,13 +174,68 @@ try {
                 }
                 [void]$ValidApps.Add($TempObj)
             } 
-            # JALUR CADANGAN (Bypass Session 0): Jika dijalankan sebagai SYSTEM, cari proses user berbasis konsumsi RAM
+            # JALUR CADANGAN (Bypass Session 0): Jika via SYSTEM, deteksi aplikasi user murni
             else {
-                # Aplikasi kerja user (Chrome, SAP, Excel) umumnya memakan RAM > 50MB (52428800 bytes) saat aktif
-                if ($Proc.WorkingSet64 -gt 52428800) {
+                # Pastikan proses memiliki Company Name/Description yang bukan dari "Microsoft Corporation" 
+                # atau jika dari Microsoft, pastikan itu aplikasi produktivitas (seperti Excel/Word)
+                $Description = $Proc.Description
+                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt") -or 
+                             ($Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
+
+                if ($IsUserApp) {
                     $TempObj = [PSCustomObject]@{
                         Name  = $Proc.ProcessName
                         Title = "Running in User Session (Background Detected)"
+                        RAM   = $Proc.WorkingSet64
+                    }
+                    [void]$ValidApps.Add($TempObj)
+                }
+            }
+        } catch { continue }
+    }
+
+# 2. Periksa aktivitas proses
+    foreach ($Proc in $AllProcesses) {
+        try {
+            # JALUR UTAMA: Jika dijalankan di session user yang aktif
+            $HasWindow = $Proc.MainWindowHandle
+            $Title = $Proc.MainWindowTitle
+
+            if ($HasWindow -and $HasWindow -ne 0 -and (-not [string]::IsNullOrWhiteSpace($Title))) {
+                $TempObj = [PSCustomObject]@{
+                    Name  = $Proc.ProcessName
+                    Title = $Title
+                    RAM   = $Proc.WorkingSet64
+                }
+                [void]$ValidApps.Add($TempObj)
+            } 
+            # JALUR CADANGAN (Bypass Session 0 via SYSTEM)
+            else {
+                $Description = $Proc.Description
+                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|msedgewebview2") -or 
+                             ($Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
+
+                if ($IsUserApp) {
+                    $RealName = $Proc.ProcessName
+                    $ContextInfo = "Running in User Session (Background Detected)"
+
+                    # --- DETEKSI PARENT PROCESS JIKA TERBACA WEBVIEW2 ---
+                    if ($Proc.ProcessName -eq "msedgewebview2") {
+                        # Ambil Parent Process ID menggunakan Get-CimInstance (sangat cepat & ringan)
+                        $ParentProcId = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).ParentProcessId
+                        if ($ParentProcId) {
+                            $ParentProc = Get-Process -Id $ParentProcId -ErrorAction SilentlyContinue
+                            if ($ParentProc -and $ParentProc.ProcessName -ne "explorer") {
+                                # Ubah nama aplikasi menjadi nama induknya agar lebih spesifik
+                                $RealName = $ParentProc.ProcessName
+                                $ContextInfo = "WebView2 Engine Instance"
+                            }
+                        }
+                    }
+
+                    $TempObj = [PSCustomObject]@{
+                        Name  = $RealName
+                        Title = $ContextInfo
                         RAM   = $Proc.WorkingSet64
                     }
                     [void]$ValidApps.Add($TempObj)
