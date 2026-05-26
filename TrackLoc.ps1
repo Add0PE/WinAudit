@@ -153,32 +153,39 @@ $CurrentActivity = "Idle / No Active Window"
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Ambil semua proses, tetapi langsung filter nama proses sistem yang pasti bukan aplikasi user
+    # 1. Ambil semua proses, kecualikan proses core OS Windows secara ketat
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|MemoryCompression|vmmem|explorer|Taskmgr)$" 
+        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost)$" 
     }
 
-    # 2. Periksa properti jendela secara hati-hati per proses
+    # 2. Periksa aktivitas proses
     foreach ($Proc in $AllProcesses) {
         try {
-            # Ambil handle jendela di dalam try internal agar jika error tidak merusak seluruh skrip
+            # JALUR UTAMA: Jika dijalankan di session user, handle jendela akan terdeteksi
             $HasWindow = $Proc.MainWindowHandle
-            
-            if ($HasWindow -and $HasWindow -ne 0 -and $HasWindow -ne [IntPtr]::Zero) {
-                $Title = $Proc.MainWindowTitle
-                if (-not [string]::IsNullOrWhiteSpace($Title)) {
+            $Title = $Proc.MainWindowTitle
+
+            if ($HasWindow -and $HasWindow -ne 0 -and (-not [string]::IsNullOrWhiteSpace($Title))) {
+                $TempObj = [PSCustomObject]@{
+                    Name  = $Proc.ProcessName
+                    Title = $Title
+                    RAM   = $Proc.WorkingSet64
+                }
+                [void]$ValidApps.Add($TempObj)
+            } 
+            # JALUR CADANGAN (Bypass Session 0): Jika dijalankan sebagai SYSTEM, cari proses user berbasis konsumsi RAM
+            else {
+                # Aplikasi kerja user (Chrome, SAP, Excel) umumnya memakan RAM > 50MB (52428800 bytes) saat aktif
+                if ($Proc.WorkingSet64 -gt 52428800) {
                     $TempObj = [PSCustomObject]@{
                         Name  = $Proc.ProcessName
-                        Title = $Title
+                        Title = "Running in User Session (Background Detected)"
                         RAM   = $Proc.WorkingSet64
                     }
                     [void]$ValidApps.Add($TempObj)
                 }
             }
-        } catch { 
-            # Jika 1 proses sistem eror saat dibaca handle-nya, abaikan dan lanjut ke proses berikutnya
-            continue 
-        }
+        } catch { continue }
     }
 
 # 3. Tentukan aplikasi aktif berdasarkan konsumsi memori terbesar
