@@ -147,90 +147,80 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (FINAL RESILIENT VERSION) ---
+# --- DETEKSI AKTIVITAS USER (FINAL RESILIENT & COMPLETE VERSION) ---
 $CurrentActivity = "Idle / No Active Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-# 1. Ambil semua proses, perkecil ruang lingkup HANYA pada proses yang memiliki deskripsi/komponen user
-    # Tambahkan pola pemblokiran untuk "Memory Compression", "WmiPrvSE", dan komponen sistem lainnya
+    # 1. Ambil semua proses, perkecil ruang lingkup HANYA pada proses non-OS
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
         $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*)$" 
-    }
-
-    # 2. Periksa aktivitas proses
-    foreach ($Proc in $AllProcesses) {
-        try {
-            # JALUR UTAMA: Jika dijalankan di session user yang aktif
-            $HasWindow = $Proc.MainWindowHandle
-            $Title = $Proc.MainWindowTitle
-
-            if ($HasWindow -and $HasWindow -ne 0 -and (-not [string]::IsNullOrWhiteSpace($Title))) {
-                $TempObj = [PSCustomObject]@{
-                    Name  = $Proc.ProcessName
-                    Title = $Title
-                    RAM   = $Proc.WorkingSet64
-                }
-                [void]$ValidApps.Add($TempObj)
-            } 
-            # JALUR CADANGAN (Bypass Session 0): Jika via SYSTEM, deteksi aplikasi user murni
-            else {
-                # Pastikan proses memiliki Company Name/Description yang bukan dari "Microsoft Corporation" 
-                # atau jika dari Microsoft, pastikan itu aplikasi produktivitas (seperti Excel/Word)
-                $Description = $Proc.Description
-                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt") -or 
-                             ($Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
-
-                if ($IsUserApp) {
-                    $TempObj = [PSCustomObject]@{
-                        Name  = $Proc.ProcessName
-                        Title = "Running in User Session (Background Detected)"
-                        RAM   = $Proc.WorkingSet64
-                    }
-                    [void]$ValidApps.Add($TempObj)
-                }
-            }
-        } catch { continue }
     }
 
 # 2. Periksa aktivitas proses
     foreach ($Proc in $AllProcesses) {
         try {
-            # JALUR UTAMA: Jika dijalankan di session user yang aktif
+            # --- STRATEGI JALUR UTAMA (SESSION 1 - INTERACTIVE USER) ---
+            # Jika skrip Anda sudah berhasil dipindah ke sesi user, baris ini akan membaca segalanya dengan akurat!
             $HasWindow = $Proc.MainWindowHandle
             $Title = $Proc.MainWindowTitle
 
-            if ($HasWindow -and $HasWindow -ne 0 -and (-not [string]::IsNullOrWhiteSpace($Title))) {
+            if ($HasWindow -and $HasWindow -ne 0 -and $HasWindow -ne [IntPtr]::Zero -and (-not [string]::IsNullOrWhiteSpace($Title))) {
+                
+                # Modifikasi khusus Outlook agar tampilannya rapi di Telegram
+                $ContextTitle = $Title
+                if ($Proc.ProcessName -eq "OUTLOOK") {
+                    # Mengubah judul bawaan Outlook "Inbox - nama@domain.com - Outlook" menjadi fokus subjeknya saja
+                    $ContextTitle = $Title -replace " - Outlook", ""
+                }
+
                 $TempObj = [PSCustomObject]@{
                     Name  = $Proc.ProcessName
-                    Title = $Title
+                    Title = $ContextTitle
                     RAM   = $Proc.WorkingSet64
                 }
                 [void]$ValidApps.Add($TempObj)
             } 
-            # JALUR CADANGAN (Bypass Session 0 via SYSTEM)
+            # --- STRATEGI JALUR CADANGAN (FALLBACK SESSION 0 - SYSTEM TASK) ---
+            # Jika device tertentu masih menjalankan skrip sebagai SYSTEM, gunakan trik forensik ini
             else {
                 $Description = $Proc.Description
-                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|msedgewebview2") -or 
+                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook") -or 
                              ($Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
 
                 if ($IsUserApp) {
                     $RealName = $Proc.ProcessName
-                    $ContextInfo = "Running in User Session (Background Detected)"
+                    $ContextInfo = "Active Background Session"
 
-                    # --- DETEKSI PARENT PROCESS JIKA TERBACA WEBVIEW2 ---
-                    if ($Proc.ProcessName -eq "msedgewebview2") {
-                        # Ambil Parent Process ID menggunakan Get-CimInstance (sangat cepat & ringan)
+                    # 2.a. Bongkar File Office & Notepad via CommandLine (Sangat Akurat di Session 0)
+                    if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
+                        $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+                        if ($CmdLine) {
+                            if ($CmdLine -match '"([^"\\]+\.[a-z0-9]+)"\s*$' -or $CmdLine -match '([^\\]+\.[a-z0-9]+)"*\s*$') {
+                                $FileName = $Matches[1] -replace '[\*\_`\[\]\(\)]', ''
+                                $ContextInfo = "File: $FileName"
+                            }
+                        }
+                    }
+                    # 2.b. Jika terbaca WebView2, lacak induknya
+                    elseif ($Proc.ProcessName -eq "msedgewebview2") {
                         $ParentProcId = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).ParentProcessId
                         if ($ParentProcId) {
                             $ParentProc = Get-Process -Id $ParentProcId -ErrorAction SilentlyContinue
                             if ($ParentProc -and $ParentProc.ProcessName -ne "explorer") {
-                                # Ubah nama aplikasi menjadi nama induknya agar lebih spesifik
                                 $RealName = $ParentProc.ProcessName
-                                $ContextInfo = "WebView2 Engine Instance"
+                                $ContextInfo = "WebView2 Engine"
                             }
                         }
+                    }
+                    # 2.c. Jika Browser mentok di Session 0
+                    elseif ($Proc.ProcessName -match "chrome|msedge|brave|firefox") {
+                        $ContextInfo = "Browsing Activity"
+                    }
+                    # 2.d. Jika Outlook mentok di Session 0
+                    elseif ($Proc.ProcessName -eq "OUTLOOK") {
+                        $ContextInfo = "Email Client Active"
                     }
 
                     $TempObj = [PSCustomObject]@{
@@ -241,19 +231,19 @@ try {
                     [void]$ValidApps.Add($TempObj)
                 }
             }
-        } catch { continue }
+        } catch { 
+            continue 
+        }
     }
 
-# 3. Tentukan aplikasi aktif berdasarkan konsumsi memori terbesar
+    # 3. Tentukan aplikasi aktif berdasarkan konsumsi memori terbesar
     if ($ValidApps.Count -gt 0) {
         $TopApp = $ValidApps | Sort-Object RAM -Descending | Select-Object -First 1
         
-        # Ambil teks mentah
         $CleanAppName = $TopApp.Name
         $CleanTitle   = $TopApp.Title
 
-        # --- PROSES SANITISASI STRING MURNI (TANPA REGEX) ---
-        # Menghapus karakter berbahaya satu per satu secara literal agar aman di semua versi PowerShell
+        # Proses Sanitisasi String Murni (Tanpa Regex) agar Markdown Telegram aman
         $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
         foreach ($Char in $DangerousChars) {
             $CleanAppName = $CleanAppName.Replace($Char, '')
@@ -262,7 +252,6 @@ try {
             }
         }
 
-        # Batasi panjang karakter judul jendela agar tidak terlalu panjang di Telegram (Maks 60 Karakter)
         if ($CleanTitle.Length -gt 60) {
             $CleanTitle = $CleanTitle.Substring(0, 57) + "..."
         }
@@ -273,7 +262,7 @@ try {
     }
 
 } catch {
-    # Jika sampai baris ini lumpuh (hampir mustahil), tangkap pesan error aslinya agar ketahuan masalahnya
+    # Jika sampai baris ini lumpuh, tangkap pesan error aslinya
     $CurrentActivity = "Debug: $($_.Exception.Message)"
 }
 
