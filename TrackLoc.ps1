@@ -147,31 +147,28 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (FINAL RESILIENT & COMPLETE VERSION) ---
-$CurrentActivity = "Idle / No Active Window"
+# --- DETEKSI AKTIVITAS USER (CLEANED & DISTINCT LIST) ---
+$CurrentActivity = "• No Active GUI Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Ambil semua proses, perkecil ruang lingkup HANYA pada proses non-OS
+    # 1. Ambil semua proses, saring proses core OS Windows DAN service latar belakang yang tidak penting
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*)$" 
+        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMu.*)$" 
     }
 
-# 2. Periksa aktivitas proses
+    # 2. Periksa aktivitas proses satu per satu
     foreach ($Proc in $AllProcesses) {
         try {
-            # --- STRATEGI JALUR UTAMA (SESSION 1 - INTERACTIVE USER) ---
-            # Jika skrip Anda sudah berhasil dipindah ke sesi user, baris ini akan membaca segalanya dengan akurat!
+            # JALUR UTAMA: Jika dijalankan di session user yang aktif
             $HasWindow = $Proc.MainWindowHandle
             $Title = $Proc.MainWindowTitle
 
             if ($HasWindow -and $HasWindow -ne 0 -and $HasWindow -ne [IntPtr]::Zero -and (-not [string]::IsNullOrWhiteSpace($Title))) {
                 
-                # Modifikasi khusus Outlook agar tampilannya rapi di Telegram
                 $ContextTitle = $Title
                 if ($Proc.ProcessName -eq "OUTLOOK") {
-                    # Mengubah judul bawaan Outlook "Inbox - nama@domain.com - Outlook" menjadi fokus subjeknya saja
                     $ContextTitle = $Title -replace " - Outlook", ""
                 }
 
@@ -182,8 +179,7 @@ try {
                 }
                 [void]$ValidApps.Add($TempObj)
             } 
-            # --- STRATEGI JALUR CADANGAN (FALLBACK SESSION 0 - SYSTEM TASK) ---
-            # Jika device tertentu masih menjalankan skrip sebagai SYSTEM, gunakan trik forensik ini
+            # JALUR CADANGAN: Jika via SYSTEM (Isolasi Session 0)
             else {
                 $Description = $Proc.Description
                 $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook") -or 
@@ -193,7 +189,7 @@ try {
                     $RealName = $Proc.ProcessName
                     $ContextInfo = "Active Background Session"
 
-                    # 2.a. Bongkar File Office & Notepad via CommandLine (Sangat Akurat di Session 0)
+                    # 2.a. Bongkar File Office via CommandLine
                     if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
                         $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
                         if ($CmdLine) {
@@ -203,7 +199,7 @@ try {
                             }
                         }
                     }
-                    # 2.b. Jika terbaca WebView2, lacak induknya
+                    # 2.b. Jika terbaca WebView2
                     elseif ($Proc.ProcessName -eq "msedgewebview2") {
                         $ParentProcId = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).ParentProcessId
                         if ($ParentProcId) {
@@ -229,41 +225,51 @@ try {
                         RAM   = $Proc.WorkingSet64
                     }
                     [void]$ValidApps.Add($TempObj)
-                }
-            }
+                } # Akhir dari if ($IsUserApp)
+            } # Akhir dari else (Jalur Cadangan)
         } catch { 
             continue 
-        }
-    }
+        } 
+    } 
 
-    # 3. Tentukan aplikasi aktif berdasarkan konsumsi memori terbesar
+    # 3. KONSOLIDASI LOGIKA (ANTI-SPAM DUPLIKAT TAB & FILTERING)
     if ($ValidApps.Count -gt 0) {
-        $TopApp = $ValidApps | Sort-Object RAM -Descending | Select-Object -First 1
-        
-        $CleanAppName = $TopApp.Name
-        $CleanTitle   = $TopApp.Title
+        $GroupedApps = $ValidApps | Group-Object Name
+        $AppLines = @()
 
-        # Proses Sanitisasi String Murni (Tanpa Regex) agar Markdown Telegram aman
-        $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
-        foreach ($Char in $DangerousChars) {
-            $CleanAppName = $CleanAppName.Replace($Char, '')
-            if ($CleanTitle) {
-                $CleanTitle = $CleanTitle.Replace($Char, '')
+        foreach ($Group in $GroupedApps) {
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Browsing Activity|Active Background Session|WebView2 Engine)$" } | Select-Object -First 1
+            
+            if (-not $BestRecord) {
+                $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
             }
-        }
 
-        if ($CleanTitle.Length -gt 60) {
-            $CleanTitle = $CleanTitle.Substring(0, 57) + "..."
-        }
+            $CleanAppName = $BestRecord.Name
+            $CleanTitle   = $BestRecord.Title
 
-        $CurrentActivity = "$CleanAppName ($CleanTitle)"
+            # Sanitisasi String Murni
+            $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
+            foreach ($Char in $DangerousChars) {
+                $CleanAppName = $CleanAppName.Replace($Char, '')
+                if ($CleanTitle) {
+                    $CleanTitle = $CleanTitle.Replace($Char, '')
+                }
+            }
+
+            if ($CleanTitle.Length -gt 40) {
+                $CleanTitle = $CleanTitle.Substring(0, 37) + "..."
+            }
+
+            $AppLines += "• $CleanAppName ($CleanTitle)"
+        } 
+
+        $CurrentActivity = ($AppLines | Sort-Object) -join "`n"
     } else {
-        $CurrentActivity = "No Active GUI Window"
+        $CurrentActivity = "• No Active GUI Window"
     }
 
 } catch {
-    # Jika sampai baris ini lumpuh, tangkap pesan error aslinya
-    $CurrentActivity = "Debug: $($_.Exception.Message)"
+    $CurrentActivity = "• Debug: $($_.Exception.Message)"
 }
 
 # --- LOGIKA TAMPILAN LOKASI ---
@@ -290,8 +296,9 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
            "🔋 *Battery:* $BatteryString`n" +
            "📶 *Network:* $NetUsage Kbps`n" +
-           "🖱️ *Active App:* $CurrentActivity`n" +
            "⏱️ *Uptime:* $UptimeString`n" +
+           "━━━━━━━━━━━━━━━━━━`n" +
+           "🖱️ *Active App: *`n$CurrentActivity`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💾 *SPACE STORAGE STATUS:*`n$DiskReport" +
            "━━━━━━━━━━━━━━━━━━`n" +
