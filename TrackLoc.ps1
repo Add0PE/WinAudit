@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (PRIVILEGE RESILIENT VERSION) ---
+# --- DETEKSI AKTIVITAS USER (ACCURATE PRIVILEGE RESILIENT) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -167,7 +167,7 @@ try {
                 $AppName = $Proc.ProcessName
             }
 
-            # JALUR UTAMA: Deteksi visual Window Handle (Bekerja sempurna di Admin)
+            # JALUR UTAMA: Deteksi visual Window Handle (Untuk Akun Admin)
             $HasWindow = $Proc.MainWindowHandle
             $Title = $Proc.MainWindowTitle
 
@@ -185,21 +185,22 @@ try {
                 }
                 [void]$ValidApps.Add($TempObj)
             } 
-            # JALUR CADANGAN & FALLBACK STANDARD USER: (Mengatasi Isu Access Denied di Akun Non-Admin)
+            # JALUR CADANGAN & FALLBACK STANDARD USER (Aman & Akurat)
             else {
-                # Filter berbasis nama proses yang pasti dibuka oleh user kerja (Aman diakses akun Standard User)
-                $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams)$"
+                # Saring nama proses aplikasi kerja populer (Ditambahkan mstsc, powershell, dan wildcard whatsapp)
+                $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp.*|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams|mstsc|powershell.*)$"
 
                 if ($IsUserApp) {
-                    $ContextInfo = "Browser Aktif"
+                    $ContextInfo = "Aplikasi Berjalan"
                     
+                    # Evaluasi ketat menggunakan operator -eq (Equal) agar tidak salah deteksi silang
                     if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
-                        # Ambil CommandLine dengan proteksi try-catch khusus Standard User
-                        $ContextInfo = "Aplikasi Berjalan"
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
                             if ($CmdLine -and $CmdLine -match '"([^"\\]+\.[a-z0-9]+)"\s*$' -or $CmdLine -match '([^\\]+\.[a-z0-9]+)"*\s*$') {
                                 $ContextInfo = "File: $($Matches[1] -replace '[\*\_`\[\]\(\)]', '')"
+                            } else {
+                                $ContextInfo = "Dokumen Terbuka"
                             }
                         } catch {
                             $ContextInfo = "Dokumen Terbuka"
@@ -208,8 +209,23 @@ try {
                     elseif ($Proc.ProcessName -eq "OUTLOOK") {
                         $ContextInfo = "Email Aktif"
                     }
+                    elseif ($Proc.ProcessName -match "^(chrome|msedge|brave|firefox)$") {
+                        $ContextInfo = "Browser Aktif"
+                    }
                     elseif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") {
                         $ContextInfo = "Layanan Latar Belakang"
+                    }
+                    elseif ($Proc.ProcessName -eq "mstsc") {
+                        $ContextInfo = "Remote Desktop Aktif"
+                    }
+                    elseif ($Proc.ProcessName -match "powershell") {
+                        $ContextInfo = "Konsol PowerShell"
+                    }
+                    elseif ($Proc.ProcessName -match "whatsapp") {
+                        $ContextInfo = "WhatsApp Messenger"
+                    }
+                    elseif ($Proc.ProcessName -eq "anydesk") {
+                        $ContextInfo = "Remote Akses"
                     }
 
                     $TempObj = [PSCustomObject]@{
@@ -231,8 +247,8 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            # Prioritaskan record yang sukses mengambil judul spesifik window (Fitur Akun Admin)
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang|Dokumen Terbuka)$" } | Select-Object -First 1
+            # Prioritaskan record yang sukses mengambil judul spesifik window
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses)$" } | Select-Object -First 1
             
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
