@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (FORTICLIENT VPN DETECT VERSION) ---
+# --- DETEKSI AKTIVITAS USER (FORTICLIENT LIVE STATUS VERSION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -187,7 +187,7 @@ try {
             } 
             # JALUR CADANGAN & FALLBACK STANDARD USER (Aman & Akurat)
             else {
-                # Saring nama proses aplikasi kerja (DITAMBAHKAN varian FortiClient di bawah ini)
+                # Saring nama proses aplikasi kerja
                 $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp.*|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams|mstsc|powershell.*|LockoutStatus|Taskmgr|Acrobat|forticlient.*|fortisslvpnclient)$"
 
                 if ($IsUserApp) {
@@ -236,9 +236,16 @@ try {
                     elseif ($Proc.ProcessName -eq "Acrobat") {
                         $ContextInfo = "Membuka Dokumen PDF"
                     }
-                    # Penanganan Konteks Khusus FortiClient VPN
+                    # LOGIKA DETEKSI STATUS KONEKSI FORTICLIENT VPN
                     elseif ($Proc.ProcessName -match "forticlient|fortisslvpnclient") {
-                        $ContextInfo = "Secure VPN Tunnel Connected"
+                        # Cek apakah ada Virtual Adapter Fortinet yang sedang aktif (Up) dan memiliki IP
+                        $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
+                        
+                        if ($VpnAdapter) {
+                            $ContextInfo = "VPN Connected"
+                        } else {
+                            $ContextInfo = "VPN Disconnected"
+                        }
                     }
 
                     $TempObj = [PSCustomObject]@{
@@ -261,7 +268,7 @@ try {
 
         foreach ($Group in $GroupedApps) {
             # Prioritaskan record yang sukses mengambil judul spesifik window
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses|Audit Lockout User|Windows Task Manager|Membuka Dokumen PDF|Secure VPN Tunnel Connected)$" } | Select-Object -First 1
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Active|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses|Audit Lockout User|Windows Task Manager|Membuka Dokumen PDF|VPN Connected|VPN Disconnected)$" } | Select-Object -First 1
             
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
