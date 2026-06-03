@@ -147,15 +147,15 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (ACCURATE PRIVILEGE RESILIENT) ---
+# --- DETEKSI AKTIVITAS USER (EXPANDED ACCURATE PRIVILEGE RESILIENT) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Perketat filter blacklist untuk membuang proses internal Windows & Bloatware Vendor
+    # 1. Ambil semua proses, saring proses core OS (MENGELUARKAN Taskmgr dari blacklist agar bisa dipantau)
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Secure System|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMu.*|LockApp|sihost|Widgets|CrossDeviceResume|SenaryAudioApp)$" 
+        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Secure System|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMu.*|LockApp|sihost|Widgets|CrossDeviceResume|SenaryAudioApp)$" 
     }
 
     # 2. Periksa aktivitas proses satu per satu
@@ -187,13 +187,13 @@ try {
             } 
             # JALUR CADANGAN & FALLBACK STANDARD USER (Aman & Akurat)
             else {
-                # Saring nama proses aplikasi kerja populer (Ditambahkan mstsc, powershell, dan wildcard whatsapp)
-                $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp.*|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams|mstsc|powershell.*)$"
+                # Saring nama proses aplikasi kerja (Ditambahkan LockoutStatus, Taskmgr, dan Acrobat)
+                $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp.*|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams|mstsc|powershell.*|LockoutStatus|Taskmgr|Acrobat)$"
 
                 if ($IsUserApp) {
                     $ContextInfo = "Aplikasi Berjalan"
                     
-                    # Evaluasi ketat menggunakan operator -eq (Equal) agar tidak salah deteksi silang
+                    # Evaluasi ketat nama proses untuk menentukan label informasi konteks
                     if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
@@ -227,6 +227,15 @@ try {
                     elseif ($Proc.ProcessName -eq "anydesk") {
                         $ContextInfo = "Remote Akses"
                     }
+                    elseif ($Proc.ProcessName -eq "LockoutStatus") {
+                        $ContextInfo = "Audit Lockout User"
+                    }
+                    elseif ($Proc.ProcessName -eq "Taskmgr") {
+                        $ContextInfo = "Windows Task Manager"
+                    }
+                    elseif ($Proc.ProcessName -eq "Acrobat") {
+                        $ContextInfo = "Membuka Dokumen PDF"
+                    }
 
                     $TempObj = [PSCustomObject]@{
                         Name  = $AppName
@@ -248,7 +257,7 @@ try {
 
         foreach ($Group in $GroupedApps) {
             # Prioritaskan record yang sukses mengambil judul spesifik window
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses)$" } | Select-Object -First 1
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses|Audit Lockout User|Windows Task Manager|Membuka Dokumen PDF)$" } | Select-Object -First 1
             
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
