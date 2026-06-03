@@ -147,21 +147,27 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (CLEANED & DISTINCT LIST) ---
+# --- DETEKSI AKTIVITAS USER (APP DESCRIPTION VERSION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Ambil semua proses, saring proses core OS Windows DAN service latar belakang yang tidak penting
+    # 1. Perketat filter blacklist untuk membuang proses internal Windows & Bloatware Vendor
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMu.*)$" 
+        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Secure System|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|Taskmgr|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMu.*|LockApp|sihost|Widgets|CrossDeviceResume|SenaryAudioApp)$" 
     }
 
     # 2. Periksa aktivitas proses satu per satu
     foreach ($Proc in $AllProcesses) {
         try {
-            # JALUR UTAMA: Jika dijalankan di session user yang aktif
+            # Ambil Deskripsi Aplikasi, jika kosong/null gunakan ProcessName sebagai cadangan
+            $AppName = $Proc.Description
+            if ([string]::IsNullOrWhiteSpace($AppName)) {
+                $AppName = $Proc.ProcessName
+            }
+
+            # JALUR UTAMA: Jika dijalankan di session user yang aktif (Interactive)
             $HasWindow = $Proc.MainWindowHandle
             $Title = $Proc.MainWindowTitle
 
@@ -173,7 +179,7 @@ try {
                 }
 
                 $TempObj = [PSCustomObject]@{
-                    Name  = $Proc.ProcessName
+                    Name  = $AppName
                     Title = $ContextTitle
                     RAM   = $Proc.WorkingSet64
                 }
@@ -181,13 +187,12 @@ try {
             } 
             # JALUR CADANGAN: Jika via SYSTEM (Isolasi Session 0)
             else {
-                $Description = $Proc.Description
-                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook") -or 
-                             ($Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
+                # Saring aplikasi kerja user atau aplikasi pihak ketiga yang memakan memori signifikan
+                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams") -or 
+                             ($Proc.Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
 
                 if ($IsUserApp) {
-                    $RealName = $Proc.ProcessName
-                    $ContextInfo = "Active Background Session"
+                    $ContextInfo = "Aplikasi Berjalan"
 
                     # 2.a. Bongkar File Office via CommandLine
                     if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
@@ -199,46 +204,40 @@ try {
                             }
                         }
                     }
-                    # 2.b. Jika terbaca WebView2
-                    elseif ($Proc.ProcessName -eq "msedgewebview2") {
-                        $ParentProcId = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).ParentProcessId
-                        if ($ParentProcId) {
-                            $ParentProc = Get-Process -Id $ParentProcId -ErrorAction SilentlyContinue
-                            if ($ParentProc -and $ParentProc.ProcessName -ne "explorer") {
-                                $RealName = $ParentProc.ProcessName
-                                $ContextInfo = "WebView2 Engine"
-                            }
-                        }
+                    # 2.b. Jika Browser mentok di Session 0
+                    elif ($Proc.ProcessName -match "chrome|msedge|brave|firefox") {
+                        $ContextInfo = "Browser Aktif"
                     }
-                    # 2.c. Jika Browser mentok di Session 0
-                    elseif ($Proc.ProcessName -match "chrome|msedge|brave|firefox") {
-                        $ContextInfo = "Browsing Activity"
-                    }
-                    # 2.d. Jika Outlook mentok di Session 0
+                    # 2.c. Jika Outlook mentok di Session 0
                     elseif ($Proc.ProcessName -eq "OUTLOOK") {
-                        $ContextInfo = "Email Client Active"
+                        $ContextInfo = "Email Aktif"
+                    }
+                    # 2.d. Jika komponen Microsoft Teams / M365 Copilot / WebView2
+                    elif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot") {
+                        $ContextInfo = "Layanan Latar Belakang"
                     }
 
                     $TempObj = [PSCustomObject]@{
-                        Name  = $RealName
+                        Name  = $AppName
                         Title = $ContextInfo
                         RAM   = $Proc.WorkingSet64
                     }
                     [void]$ValidApps.Add($TempObj)
-                } # Akhir dari if ($IsUserApp)
-            } # Akhir dari else (Jalur Cadangan)
+                } 
+            } 
         } catch { 
             continue 
         } 
     } 
 
-    # 3. KONSOLIDASI LOGIKA (ANTI-SPAM DUPLIKAT TAB & FILTERING)
+    # 3. KONSOLIDASI LOGIKA (ANTI-DUPLIKAT & DISPLAY)
     if ($ValidApps.Count -gt 0) {
         $GroupedApps = $ValidApps | Group-Object Name
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Browsing Activity|Active Background Session|WebView2 Engine)$" } | Select-Object -First 1
+            # Prioritaskan record yang berhasil mengambil judul spesifik (bukan teks default session 0)
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang)$" } | Select-Object -First 1
             
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
@@ -247,7 +246,7 @@ try {
             $CleanAppName = $BestRecord.Name
             $CleanTitle   = $BestRecord.Title
 
-            # Sanitisasi String Murni
+            # Sanitisasi String Murni agar Markdown Telegram aman
             $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
             foreach ($Char in $DangerousChars) {
                 $CleanAppName = $CleanAppName.Replace($Char, '')
