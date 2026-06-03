@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (APP DESCRIPTION VERSION) ---
+# --- DETEKSI AKTIVITAS USER (PRIVILEGE RESILIENT VERSION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -161,13 +161,13 @@ try {
     # 2. Periksa aktivitas proses satu per satu
     foreach ($Proc in $AllProcesses) {
         try {
-            # Ambil Deskripsi Aplikasi, jika kosong/null gunakan ProcessName sebagai cadangan
+            # Ambil Deskripsi Aplikasi, jika kosong/gagal karena hak akses, gunakan ProcessName
             $AppName = $Proc.Description
             if ([string]::IsNullOrWhiteSpace($AppName)) {
                 $AppName = $Proc.ProcessName
             }
 
-            # JALUR UTAMA: Jika dijalankan di session user yang aktif (Interactive)
+            # JALUR UTAMA: Deteksi visual Window Handle (Bekerja sempurna di Admin)
             $HasWindow = $Proc.MainWindowHandle
             $Title = $Proc.MainWindowTitle
 
@@ -185,35 +185,30 @@ try {
                 }
                 [void]$ValidApps.Add($TempObj)
             } 
-            # JALUR CADANGAN: Jika via SYSTEM (Isolasi Session 0)
+            # JALUR CADANGAN & FALLBACK STANDARD USER: (Mengatasi Isu Access Denied di Akun Non-Admin)
             else {
-                # Saring aplikasi kerja user atau aplikasi pihak ketiga yang memakan memori signifikan
-                $IsUserApp = ($Proc.ProcessName -match "chrome|msedge|brave|firefox|sap|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams") -or 
-                             ($Proc.Description -notmatch "Microsoft|Windows" -and $Proc.WorkingSet64 -gt 52428800)
+                # Filter berbasis nama proses yang pasti dibuka oleh user kerja (Aman diakses akun Standard User)
+                $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams)$"
 
                 if ($IsUserApp) {
-                    $ContextInfo = "Aplikasi Berjalan"
-
-                    # 2.a. Bongkar File Office via CommandLine
+                    $ContextInfo = "Browser Aktif"
+                    
                     if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
-                        $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-                        if ($CmdLine) {
-                            if ($CmdLine -match '"([^"\\]+\.[a-z0-9]+)"\s*$' -or $CmdLine -match '([^\\]+\.[a-z0-9]+)"*\s*$') {
-                                $FileName = $Matches[1] -replace '[\*\_`\[\]\(\)]', ''
-                                $ContextInfo = "File: $FileName"
+                        # Ambil CommandLine dengan proteksi try-catch khusus Standard User
+                        $ContextInfo = "Aplikasi Berjalan"
+                        try {
+                            $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+                            if ($CmdLine -and $CmdLine -match '"([^"\\]+\.[a-z0-9]+)"\s*$' -or $CmdLine -match '([^\\]+\.[a-z0-9]+)"*\s*$') {
+                                $ContextInfo = "File: $($Matches[1] -replace '[\*\_`\[\]\(\)]', '')"
                             }
+                        } catch {
+                            $ContextInfo = "Dokumen Terbuka"
                         }
                     }
-                    # 2.b. Jika Browser mentok di Session 0
-                    elif ($Proc.ProcessName -match "chrome|msedge|brave|firefox") {
-                        $ContextInfo = "Browser Aktif"
-                    }
-                    # 2.c. Jika Outlook mentok di Session 0
                     elseif ($Proc.ProcessName -eq "OUTLOOK") {
                         $ContextInfo = "Email Aktif"
                     }
-                    # 2.d. Jika komponen Microsoft Teams / M365 Copilot / WebView2
-                    elif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot") {
+                    elseif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") {
                         $ContextInfo = "Layanan Latar Belakang"
                     }
 
@@ -236,8 +231,8 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            # Prioritaskan record yang berhasil mengambil judul spesifik (bukan teks default session 0)
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang)$" } | Select-Object -First 1
+            # Prioritaskan record yang sukses mengambil judul spesifik window (Fitur Akun Admin)
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Aktif|Layanan Latar Belakang|Dokumen Terbuka)$" } | Select-Object -First 1
             
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
@@ -246,7 +241,7 @@ try {
             $CleanAppName = $BestRecord.Name
             $CleanTitle   = $BestRecord.Title
 
-            # Sanitisasi String Murni agar Markdown Telegram aman
+            # Sanitisasi String Murni
             $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
             foreach ($Char in $DangerousChars) {
                 $CleanAppName = $CleanAppName.Replace($Char, '')
