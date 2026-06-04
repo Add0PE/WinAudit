@@ -147,15 +147,14 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST PARSING - FIX SINTAKS) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - AGGRESSIVE CLEAN FILTER) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Cari tahu siapa nama user yang sedang aktif di layar (Session Interaktif)
+    # 1. Cari tahu siapa nama user yang sedang aktif di layar
     $ActiveUser = $null
-    
     $Explorers = Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue
     if ($Explorers) {
         foreach ($Exp in $Explorers) {
@@ -179,27 +178,34 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TEMBUS BLOKADE: Jika user aktif terdeteksi, gunakan tasklist.exe
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER AGRESIF
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
-        # Ambil daftar proses milik user dalam format CSV murni bawaan OS
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # Blacklist string proses internal level user yang tidak perlu ditampilkan
-        $UserBlacklist = "explorer|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|conhost|dllhost|TextInputHost|ctfmon|taskhostw|LockApp|sihost|Widgets"
+        # BLACKLIST AGRESIF: Membuang noise OS, Driver Audio/Grafis, Antivirus, dan Utilitas Hardware
+        # Tetap membiarkan OneDrive dan LenovoVantage lolos filter
+        $UserBlacklist = @(
+            "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
+            "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
+            "avp", "avpui", "backgroundTaskHost", "crashhelper", "CrossDeviceResume", "ETDctrl", "ETDControlCenter",
+            "FortiClient-Taskbar", "FortiClient", "taskhostex", "IGCC", "IGCCTray", "igfxEM", "LenovoPowerManagerHost",
+            "Lenovo\.Modern\.ImController\.PluginHost", "RtkAudioService", "Realtek.*", "ShellHost", "ShowOSD", 
+            "WidgetService", "smartscreen", "SecurityHealthSystray", "WindowsPackageManagerServer", "svchost",
+            "SearchProtocolHost", "OutlookComm.*", "PhoneExperienceHost", "PhoneLink"
+        ) -join "|"
 
         if ($TasklistRaw) {
             foreach ($Row in $TasklistRaw) {
-                # Parsing format CSV: "Image Name","PID","Session Name","Session#","Mem Usage"
                 if ($Row -match '"([^"]+)","([^"]+)","([^"]+)","([^"]+)","([^"]+)"') {
                     $ProcNameWithExe = $Matches[1]
                     $ProcName = $ProcNameWithExe -replace "\.exe$", ""
                     $ProcId   = $Matches[2]
 
-                    # Filter out jika masuk blacklist
+                    # Filter out jika nama proses cocok dengan blacklist agresif
                     if ($ProcName -match "^($UserBlacklist)$") { continue }
 
-                    # Ambil deskripsi asli aplikasi via Get-Process secara aman menggunakan ID yang valid
+                    # Ambil deskripsi asli aplikasi
                     $AppName = $ProcName
                     try {
                         $LiveProc = Get-Process -Id $ProcId -ErrorAction SilentlyContinue
@@ -210,7 +216,7 @@ try {
 
                     $ContextInfo = "Aplikasi Aktif"
                     
-                    # Pemetaan intelijen label aplikasi kerja umum (Sudah diperbaiki ke elseif)
+                    # Pemetaan intelijen label aplikasi kerja umum
                     if ($ProcName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
@@ -232,6 +238,9 @@ try {
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
                     elseif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
                     elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
+                    # Label Khusus untuk OneDrive & Lenovo
+                    elseif ($ProcName -match "OneDrive") { $ContextInfo = "Cloud Cloud Sync Active" }
+                    elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "forticlient|fortisslvpnclient") {
                         $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
                         $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
@@ -256,8 +265,7 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            # Cari record dengan konteks paling informatif
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Proses Tidak Terdaftar)$" } | Select-Object -First 1
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif)$" } | Select-Object -First 1
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Select-Object -First 1
             }
