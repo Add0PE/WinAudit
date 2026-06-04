@@ -147,21 +147,22 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (FORTICLIENT LIVE STATUS VERSION) ---
+# --- DETEKSI AKTIVITAS USER (DYNAMIC BLACKLIST & ANOMALY DETECTION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. Ambil semua proses, saring proses core OS Windows
+    # 1. BLACKLIST UTAMA: Saring proses inti operating system yang "pasti" bukan aplikasi user
+    $OsBlacklist = "^(Idle|System|SecureSystem|Secure System|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|LockApp|sihost|Widgets|CrossDeviceResume|SenaryAudioApp|ctfmon|smartscreen|taskhostw|SecurityHealthService|USOClient)$"
+
     $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.ProcessName -notmatch "^(Idle|System|SecureSystem|Secure System|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMu.*|LockApp|sihost|Widgets|CrossDeviceResume|SenaryAudioApp)$" 
+        $_.ProcessName -notmatch $OsBlacklist
     }
 
     # 2. Periksa aktivitas proses satu per satu
     foreach ($Proc in $AllProcesses) {
         try {
-            # Ambil Deskripsi Aplikasi, jika kosong/gagal karena hak akses, gunakan ProcessName
             $AppName = $Proc.Description
             if ([string]::IsNullOrWhiteSpace($AppName)) {
                 $AppName = $Proc.ProcessName
@@ -185,15 +186,16 @@ try {
                 }
                 [void]$ValidApps.Add($TempObj)
             } 
-            # JALUR CADANGAN & FALLBACK STANDARD USER (Aman & Akurat)
+            # JALUR CADANGAN & FALLBACK STANDARD USER (Sistem Deteksi Otomatis Tanpa Whitelist)
             else {
-                # Saring nama proses aplikasi kerja
-                $IsUserApp = $Proc.ProcessName -match "^(chrome|msedge|brave|firefox|saplogon|anydesk|teamviewer|whatsapp.*|excel|winword|powerpnt|notepad|msedgewebview2|outlook|LenovoVantage|M365Copilot|msteams|mstsc|powershell.*|LockoutStatus|Taskmgr|Acrobat|forticlient.*|fortisslvpnclient)$"
-
-                if ($IsUserApp) {
-                    $ContextInfo = "Aplikasi Berjalan"
+                # Saring hanya aplikasi yang memakan RAM > 36.7 MB (38535168 bytes) 
+                # Ini angka ideal untuk menangkap aplikasi GUI milik user dan mengeliminasi service kecil Windows
+                $MinRamThreshold = 38535168
+                
+                if ($Proc.WorkingSet64 -gt $MinRamThreshold) {
+                    $ContextInfo = "Aplikasi Aktif"
                     
-                    # Evaluasi ketat nama proses untuk menentukan label informasi konteks
+                    # Berikan label pintar untuk aplikasi kerja umum yang sudah kita ketahui
                     if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
@@ -202,50 +204,25 @@ try {
                             } else {
                                 $ContextInfo = "Dokumen Terbuka"
                             }
-                        } catch {
-                            $ContextInfo = "Dokumen Terbuka"
-                        }
+                        } catch { $ContextInfo = "Dokumen Terbuka" }
                     }
-                    elseif ($Proc.ProcessName -eq "OUTLOOK") {
-                        $ContextInfo = "Email Active"
-                    }
-                    elseif ($Proc.ProcessName -match "^(chrome|msedge|brave|firefox)$") {
-                        $ContextInfo = "Browser Aktif"
-                    }
-                    elseif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") {
-                        $ContextInfo = "Layanan Latar Belakang"
-                    }
-                    elseif ($Proc.ProcessName -eq "mstsc") {
-                        $ContextInfo = "Remote Desktop Aktif"
-                    }
-                    elseif ($Proc.ProcessName -match "powershell") {
-                        $ContextInfo = "Konsol PowerShell"
-                    }
-                    elseif ($Proc.ProcessName -match "whatsapp") {
-                        $ContextInfo = "WhatsApp Messenger"
-                    }
-                    elseif ($Proc.ProcessName -eq "anydesk") {
-                        $ContextInfo = "Remote Akses"
-                    }
-                    elseif ($Proc.ProcessName -eq "LockoutStatus") {
-                        $ContextInfo = "Audit Lockout User"
-                    }
-                    elseif ($Proc.ProcessName -eq "Taskmgr") {
-                        $ContextInfo = "Windows Task Manager"
-                    }
-                    elseif ($Proc.ProcessName -eq "Acrobat") {
-                        $ContextInfo = "Membuka Dokumen PDF"
-                    }
-                    # LOGIKA DETEKSI STATUS KONEKSI FORTICLIENT VPN
-                    elseif ($Proc.ProcessName -match "forticlient|fortisslvpnclient") {
-                        # Cek apakah ada Virtual Adapter Fortinet yang sedang aktif (Up) dan memiliki IP
+                    elif ($Proc.ProcessName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
+                    elif ($Proc.ProcessName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
+                    elif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
+                    elif ($Proc.ProcessName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
+                    elif ($Proc.ProcessName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
+                    elif ($Proc.ProcessName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
+                    elif ($Proc.ProcessName -eq "anydesk") { $ContextInfo = "Remote Akses" }
+                    elif ($Proc.ProcessName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
+                    elif ($Proc.ProcessName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
+                    elif ($Proc.ProcessName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
+                    elif ($Proc.ProcessName -match "forticlient|fortisslvpnclient") {
                         $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
-                        
-                        if ($VpnAdapter) {
-                            $ContextInfo = "VPN Connected"
-                        } else {
-                            $ContextInfo = "VPN Disconnected"
-                        }
+                        $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
+                    }
+                    else {
+                        # JIKA TIDAK DIKENALI: Tandai langsung sebagai kecurigaan aplikasi tidak terdaftar!
+                        $ContextInfo = "Proses Tidak Terdaftar"
                     }
 
                     $TempObj = [PSCustomObject]@{
@@ -256,9 +233,7 @@ try {
                     [void]$ValidApps.Add($TempObj)
                 } 
             } 
-        } catch { 
-            continue 
-        } 
+        } catch { continue } 
     } 
 
     # 3. KONSOLIDASI LOGIKA (ANTI-DUPLIKAT & DISPLAY)
@@ -267,8 +242,7 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            # Prioritaskan record yang sukses mengambil judul spesifik window
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Berjalan|Browser Aktif|Email Active|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses|Audit Lockout User|Windows Task Manager|Membuka Dokumen PDF|VPN Connected|VPN Disconnected)$" } | Select-Object -First 1
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Browser Aktif|Email Active|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses|Audit Lockout User|Windows Task Manager|Membuka Dokumen PDF|VPN Connected|VPN Disconnected|Proses Tidak Terdaftar)$" } | Select-Object -First 1
             
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Sort-Object RAM -Descending | Select-Object -First 1
@@ -281,14 +255,10 @@ try {
             $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
             foreach ($Char in $DangerousChars) {
                 $CleanAppName = $CleanAppName.Replace($Char, '')
-                if ($CleanTitle) {
-                    $CleanTitle = $CleanTitle.Replace($Char, '')
-                }
+                if ($CleanTitle) { $CleanTitle = $CleanTitle.Replace($Char, '') }
             }
 
-            if ($CleanTitle.Length -gt 40) {
-                $CleanTitle = $CleanTitle.Substring(0, 37) + "..."
-            }
+            if ($CleanTitle.Length -gt 40) { $CleanTitle = $CleanTitle.Substring(0, 37) + "..." }
 
             $AppLines += "• $CleanAppName ($CleanTitle)"
         } 
@@ -298,9 +268,7 @@ try {
         $CurrentActivity = "• No Active GUI Window"
     }
 
-} catch {
-    $CurrentActivity = "• Debug: $($_.Exception.Message)"
-}
+} catch { $CurrentActivity = "• Debug: $($_.Exception.Message)" }
 
 # --- LOGIKA TAMPILAN LOKASI ---
 if (!$Location.IsUnknown) {
