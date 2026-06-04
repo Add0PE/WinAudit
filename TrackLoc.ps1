@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (USER-SESSION OVERRIDES - SYSTEM COMPLIANT) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST PARSING - BYPASS TOTAL) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -156,7 +156,6 @@ try {
     # 1. Cari tahu siapa nama user yang sedang aktif di layar (Session Interaktif)
     $ActiveUser = $null
     
-    # Ambil via query session explorer (Metode Teraman untuk SYSTEM)
     $Explorers = Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue
     if ($Explorers) {
         foreach ($Exp in $Explorers) {
@@ -168,7 +167,6 @@ try {
         }
     }
 
-    # Jika metode explorer gagal, gunakan fallback quser bawaan Windows
     if ([string]::IsNullOrWhiteSpace($ActiveUser)) {
         $QuserResult = quser 2>$null
         if ($QuserResult) {
@@ -181,89 +179,88 @@ try {
         }
     }
 
-    # 2. Jika nama user aktif ditemukan, tarik proses secara spesifik berdasarkan nama user tersebut!
+    # 2. EKSEKUSI JALUR TEMBUS BLOKADE: Jika user aktif terdeteksi, gunakan tasklist.exe
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
-        # Blacklist aplikasi bawaan user yang berupa background noise
-        $UserBlacklist = "^(explorer|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|conhost|dllhost|TextInputHost|ctfmon|taskhostw|LockApp|sihost|Widgets)$"
+        # Ambil daftar proses milik user dalam format CSV murni bawaan OS
+        $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
+        
+        # Blacklist string proses internal level user yang tidak perlu ditampilkan
+        $UserBlacklist = "explorer|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|conhost|dllhost|TextInputHost|ctfmon|taskhostw|LockApp|sihost|Widgets"
 
-        # Tarik proses HANYA milik user aktif tersebut (Menembus batasan Get-Process bawaan SYSTEM)
-        $AllProcesses = Get-Process -IncludeUserName -ErrorAction SilentlyContinue | Where-Object { 
-            $_.UserName -match $ActiveUser -and $_.ProcessName -notmatch $UserBlacklist
-        }
+        if ($TasklistRaw) {
+            foreach ($Row in $TasklistRaw) {
+                # Parsing format CSV: "Image Name","PID","Session Name","Session#","Mem Usage"
+                if ($Row -match '"([^"]+)","([^"]+)","([^"]+)","([^"]+)","([^"]+)"') {
+                    $ProcNameWithExe = $Matches[1]
+                    $ProcName = $ProcNameWithExe -replace "\.exe$", ""
+                    $ProcId   = $Matches[2]
 
-        # Jika opsi -IncludeUserName diblokir oleh kebijakan hak akses di PC tersebut, gunakan fallback alternatif CIM/WMI
-        if (-not $AllProcesses) {
-            $UserProcessesIds = @()
-            $CimProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
-            foreach ($P in $CimProcesses) {
-                $Owner = Invoke-CimMethod -InputObject $P -MethodName GetOwner -ErrorAction SilentlyContinue
-                if ($Owner.User -eq $ActiveUser) {
-                    $UserProcessesIds += $P.ProcessId
-                }
-            }
-            if ($UserProcessesIds) {
-                $AllProcesses = Get-Process -Id $UserProcessesIds -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -notmatch $UserBlacklist }
-            }
-        }
+                    # Filter out jika masuk blacklist
+                    if ($ProcName -match "^($UserBlacklist)$") { continue }
 
-        # 3. Evaluasi proses milik user yang berhasil ditarik
-        foreach ($Proc in $AllProcesses) {
-            try {
-                $AppName = $Proc.Description
-                if ([string]::IsNullOrWhiteSpace($AppName)) {
-                    $AppName = $Proc.ProcessName
-                }
-
-                $ContextInfo = "Aplikasi Aktif"
-                
-                # Pemetaan label pintar aplikasi kerja umum
-                if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
+                    # Ambil deskripsi asli aplikasi via Get-Process secara aman menggunakan ID yang valid
+                    $AppName = $ProcName
                     try {
-                        $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-                        if ($CmdLine -and $CmdLine -match '"([^"\\]+\.[a-z0-9]+)"\s*$' -or $CmdLine -match '([^\\]+\.[a-z0-9]+)"*\s*$') {
-                            $ContextInfo = "File: $($Matches[1] -replace '[\*\_`\[\]\(\)]', '')"
-                        } else {
-                            $ContextInfo = "Dokumen Terbuka"
+                        $LiveProc = Get-Process -Id $ProcId -ErrorAction SilentlyContinue
+                        if ($LiveProc -and (-not [string]::IsNullOrWhiteSpace($LiveProc.Description))) {
+                            $AppName = $LiveProc.Description
                         }
-                    } catch { $ContextInfo = "Dokumen Terbuka" }
-                }
-                elif ($Proc.ProcessName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
-                elif ($Proc.ProcessName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
-                elif ($Proc.ProcessName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
-                elif ($Proc.ProcessName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
-                elif ($Proc.ProcessName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
-                elif ($Proc.ProcessName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
-                elif ($Proc.ProcessName -eq "anydesk") { $ContextInfo = "Remote Akses" }
-                elif ($Proc.ProcessName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
-                elif ($Proc.ProcessName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
-                elif ($Proc.ProcessName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
-                elif ($Proc.ProcessName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
-                elif ($Proc.ProcessName -match "forticlient|fortisslvpnclient") {
-                    $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
-                    $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
-                }
-                else {
-                    $ContextInfo = "Proses Tidak Terdaftar"
-                }
+                    } catch { }
 
-                $TempObj = [PSCustomObject]@{
-                    Name  = $AppName
-                    Title = $ContextInfo
-                }
-                [void]$ValidApps.Add($TempObj)
+                    $ContextInfo = "Aplikasi Aktif"
+                    
+                    # Pemetaan intelijen label aplikasi kerja umum
+                    if ($ProcName -match "excel|winword|powerpnt|notepad") {
+                        try {
+                            $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
+                            if ($CmdLine -and $CmdLine -match '"([^"\\]+\.[a-z0-9]+)"\s*$' -or $CmdLine -match '([^\\]+\.[a-z0-9]+)"*\s*$') {
+                                $ContextInfo = "File: $($Matches[1] -replace '[\*\_`\[\]\(\)]', '')"
+                            } else {
+                                $ContextInfo = "Dokumen Terbuka"
+                            }
+                        } catch { $ContextInfo = "Dokumen Terbuka" }
+                    }
+                    elif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
+                    elif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
+                    elif ($ProcName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
+                    elif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
+                    elif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
+                    elif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
+                    elif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
+                    elif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
+                    elif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
+                    elif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
+                    elif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
+                    elif ($ProcName -match "forticlient|fortisslvpnclient") {
+                        $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
+                        $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
+                    }
+                    else {
+                        $ContextInfo = "Proses Tidak Terdaftar"
+                    }
 
-            } catch { continue }
+                    $TempObj = [PSCustomObject]@{
+                        Name  = $AppName
+                        Title = $ContextInfo
+                    }
+                    [void]$ValidApps.Add($TempObj)
+                }
+            }
         }
     }
 
-    # 4. KONSOLIDASI LOGIKA DISPLAY
+    # 3. KONSOLIDASI LOGIKA DISPLAY
     if ($ValidApps.Count -gt 0) {
         $GroupedApps = $ValidApps | Group-Object Name
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            $BestRecord = $Group.Group | Select-Object -First 1
+            # Cari record dengan konteks paling informatif
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Proses Tidak Terdaftar)$" } | Select-Object -First 1
+            if (-not $BestRecord) {
+                $BestRecord = $Group.Group | Select-Object -First 1
+            }
 
             $CleanAppName = $BestRecord.Name
             $CleanTitle   = $BestRecord.Title
