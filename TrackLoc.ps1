@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - PERIPHERAL & SERVICE FILTER - FIX ELIF) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - DEP CLEAN FILTER VERSION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,12 +178,12 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER PERIPHERAL & UTILLITY KHUSUS
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN EXTRA REGEX UNTUK SUB-PROCESS
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # BLACKLIST DIPERLUAS: Menyaring Epson, Intel Framework, Lenovo DataCenter, Copilot Starter, dll.
+        # BLACKLIST UPGRADED: Menyapu bersih sub-Lenovo Heartbeat, PromeCEF, PushNotification, dan varian audio/grafis
         $UserBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -194,9 +194,10 @@ try {
             "SearchProtocolHost", "OutlookComm.*", "PhoneExperienceHost", "PhoneLink",
             "UserOOBEBroker", "ApplicationFrameHost", "CompPkgSrv", "LenovoVantageGenericMessagingAddin", 
             "LenovoVantageLenovoSecurityAddin", "LenovoVantageLenovoServiceBridgeAddin", "LenovoVantageSmartInteractAddin", 
-            "LenovoVantageThinkSmartSenseAddin", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp",
-            "AppActions", "EPDctrl", "E_TATSU7", "ipfutil", "LgVndPluginHost", "m365copilotautostarter", 
-            "CrossDeviceService", "SystemSettings"
+            "LenovoVantageThinkSmartSenseAddin", "LenovoVantageDeviceSettingsHeartbeatAddin", "prevhost", "OneDriveSetUp", 
+            "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", "E_TATSU7", "ipfutil", "LgVndPluginHost", 
+            "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
+            "PushNotificationsLongRunningTask", "RtkAudUService"
         ) -join "|"
 
         if ($TasklistRaw) {
@@ -220,7 +221,7 @@ try {
 
                     $ContextInfo = "Aplikasi Aktif"
                     
-                    # Pemetaan intelijen label aplikasi kerja umum (Sudah dipastikan semua Menggunakan elseif)
+                    # Pemetaan intelijen label aplikasi kerja umum
                     if ($ProcName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
