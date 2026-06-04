@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - AGGRESSIVE CLEAN FILTER) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - SPECIFIC EXTRA CLEAN FILTER) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,13 +178,12 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER AGRESIF
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER TAMBAHAN KHUSUS
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # BLACKLIST AGRESIF: Membuang noise OS, Driver Audio/Grafis, Antivirus, dan Utilitas Hardware
-        # Tetap membiarkan OneDrive dan LenovoVantage lolos filter
+        # BLACKLIST DIALIRKAN & DIPERLUAS: Memasukkan OOBE, ApplicationFrameHost, sub-Lenovo, sub-OneDrive, dll.
         $UserBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -192,7 +191,10 @@ try {
             "FortiClient-Taskbar", "FortiClient", "taskhostex", "IGCC", "IGCCTray", "igfxEM", "LenovoPowerManagerHost",
             "Lenovo\.Modern\.ImController\.PluginHost", "RtkAudioService", "Realtek.*", "ShellHost", "ShowOSD", 
             "WidgetService", "smartscreen", "SecurityHealthSystray", "WindowsPackageManagerServer", "svchost",
-            "SearchProtocolHost", "OutlookComm.*", "PhoneExperienceHost", "PhoneLink"
+            "SearchProtocolHost", "OutlookComm.*", "PhoneExperienceHost", "PhoneLink",
+            "UserOOBEBroker", "ApplicationFrameHost", "CompPkgSrv", "LenovoVantageGenericMessagingAddin", 
+            "LenovoVantageLenovoSecurityAddin", "LenovoVantageLenovoServiceBridgeAddin", "LenovoVantageSmartInteractAddin", 
+            "LenovoVantageThinkSmartSenseAddin", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp"
         ) -join "|"
 
         if ($TasklistRaw) {
@@ -238,8 +240,7 @@ try {
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
                     elseif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
                     elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
-                    # Label Khusus untuk OneDrive & Lenovo
-                    elseif ($ProcName -match "OneDrive") { $ContextInfo = "Cloud Cloud Sync Active" }
+                    elseif ($ProcName -match "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "forticlient|fortisslvpnclient") {
                         $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
@@ -265,7 +266,7 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif)$" } | Select-Object -First 1
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Proses Tidak Terdaftar)$" } | Select-Object -First 1
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Select-Object -First 1
             }
