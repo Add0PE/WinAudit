@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - FINAL REPORT OPTIMIZATION) ---
+# --- DETEKSI AKTIVITAS USER (FINAL-CORE: VPN SENSOR & VM CONSOLIDATION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,12 +178,13 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN PENYARINGAN KETAT
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN ADVANCED VPN & EMULATOR FILTER
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
         # Blacklist dasar untuk nama file Executable (.exe) bawaan Windows Noise
+        # Ditambahkan noise Mumu, MusNotifyIcon, dan crashpadhandler
         $BaseExeBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -194,10 +195,14 @@ try {
             "CompPkgSrv", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", 
             "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
             "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
-            "FMAPP", "RtkAud.*", "Realtek.*"
+            "FMAPP", "RtkAud.*", "Realtek.*", "OneDriveSyncService", "OneDriveStandaloneUpdater",
+            # Pembersih Noise Sesuai Instruksi Baru Avi
+            "MusNotifyIcon", "crashpadhandler",
+            # Memblokir Sub-Proses Pembantu MuMu agar sisa 1 list inti (MuMuNxMain) saja
+            "MuMuNxDevice", "MuMuVMM", "MuMuVMMHeadless"
         ) -join "|"
 
-        # FILTER KATA KUNCI KETAT: Epson disapu bersih. OneDrive ditangkap di sini untuk di-filter manual di bawah.
+        # FILTER KATA KUNCI KETAT VENDOR HARDWARE & AUDIO
         $VendorKeywordBlacklist = "Lenovo|Intel|Senary|Show OSD|igfx|IGCC|Epson|OneDrive"
 
         if ($TasklistRaw) {
@@ -210,7 +215,7 @@ try {
                     # Filter Lapis 1: Cek berdasarkan nama file executable dasar
                     if ($ProcName -match "^($BaseExeBlacklist)$") { continue }
                     
-                    # Filter Lapis 2a: Cek kata kunci vendor (Kecuali untuk Core OneDrive Utama)
+                    # Filter Lapis 2a: Cek kata kunci vendor (Kecuali OneDrive Core Utama)
                     if ($ProcName -match "($VendorKeywordBlacklist)" -and $ProcName -ne "OneDrive") { continue }
 
                     # Ambil deskripsi asli aplikasi (Friendly Name)
@@ -222,10 +227,10 @@ try {
                         }
                     } catch { }
 
-                    # Filter Lapis 2b: Cek kata kunci deskripsi vendor (Kecuali untuk Core OneDrive Utama)
+                    # Filter Lapis 2b: Cek kata kunci deskripsi vendor (Kecuali OneDrive Core Utama)
                     if ($AppName -match "($VendorKeywordBlacklist)" -and $ProcName -ne "OneDrive") { continue }
 
-                    $ContextInfo = "Aplikasi Aktif"
+                    $ContextInfo = "Aplikasi Latar Belakang"
                     
                     # Pemetaan intelijen label aplikasi kerja umum
                     if ($ProcName -match "excel|winword|powerpnt|notepad") {
@@ -240,27 +245,28 @@ try {
                     }
                     elseif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
                     elseif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
-                    # Mengubah "Layanan Latar Belakang" -> "Sistem / Subsistem"
                     elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot") { $ContextInfo = "Sistem / Subsistem" }
                     elseif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
-                    elseif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
+                    elseif ($ProcName -match "powershell|powershell_ise") { $ContextInfo = "Konsol PowerShell" }
                     elseif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
                     elseif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
                     elseif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
                     elseif ($ProcName -eq "Acrobat" -or $ProcName -eq "AcroRd32") { $ContextInfo = "Membuka Dokumen PDF" }
-                    elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
-                    # Pengunci List Tunggal OneDrive
+                    # Core Utama Emulator MuMu dialirkan ke sini
+                    elseif ($ProcName -match "MuMuNxMain") { $ContextInfo = "Emulator Android Aktif" }
                     elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "zoom") { $ContextInfo = "Zoom Meeting Client" }
-                    elseif ($ProcName -match "forticlient|fortisslvpnclient") {
-                        $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
-                        $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
-                    }
-                    else {
-                        # Mengubah "Proses Tidak Terdaftar" -> "Aplikasi Latar Belakang"
-                        $ContextInfo = "Aplikasi Latar Belakang"
+                    # LOGIKA FIX ULTRA-SENSITIF UNTUK FORTICLIENT VPN DETECTOR
+                    elseif ($ProcName -match "forticlient|fortisslvpnclient|FortiTray") {
+                        # Kombinasi: Cek adapter fisik/virtual up DAN rute IP aktif milik Fortinet
+                        $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
+                            ($_.InterfaceDescription -match "Fortinet|Forti|SSL-VPN|Virtual Ethernet Adapter") -and ($_.Status -eq "Up") 
+                        }
+                        $VpnRoute = Get-NetRoute -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -match "10\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*|192\.168\..*" -and $_.InterfaceMetric -le 100 }
+                        
+                        $ContextInfo = if ($VpnAdapter -or $VpnRoute) { "VPN Connected" } else { "VPN Disconnected" }
                     }
 
                     $TempObj = [PSCustomObject]@{
@@ -279,7 +285,6 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            # Prioritaskan status interaktif/spesifik daripada status Latar Belakang umum
             $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Aplikasi Latar Belakang)$" } | Select-Object -First 1
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Select-Object -First 1
