@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - PERIPHERAL & SERVICE FILTER - RE-VALIDATED) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - AGGRESSIVE VENDOR CLEAN) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,28 +178,24 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER AGRESIF TAMBAHAN
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER MASSAL VENDOR
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # BLACKLIST UPGRADED: Menyaring AdobeCollab, AI Host, Lenovo Smart Appearance, Print Driver, Senary Audio
+        # BLACKLIST MASSAL: Mematikan semua variasi Lenovo, Intel, Realtek, Adobe Sync, dan Windows Noise
         $UserBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
             "avp", "avpui", "backgroundTaskHost", "crashhelper", "CrossDeviceResume", "ETDctrl", "ETDControlCenter",
-            "FortiClient-Taskbar", "FortiClient", "taskhostex", "IGCC", "IGCCTray", "igfxEM", "LenovoPowerManagerHost",
-            "Lenovo\.Modern\.ImController\.PluginHost", "RtkAudioService", "Realtek.*", "ShellHost", "ShowOSD", 
-            "WidgetService", "smartscreen", "SecurityHealthSystray", "WindowsPackageManagerServer", "svchost",
-            "SearchProtocolHost", "OutlookComm.*", "PhoneExperienceHost", "PhoneLink",
-            "UserOOBEBroker", "ApplicationFrameHost", "CompPkgSrv", "LenovoVantageGenericMessagingAddin", 
-            "LenovoVantageLenovoSecurityAddin", "LenovoVantageLenovoServiceBridgeAddin", "LenovoVantageSmartInteractAddin", 
-            "LenovoVantageThinkSmartSenseAddin", "LenovoVantageDeviceSettingsHeartbeatAddin", "prevhost", "OneDriveSetUp", 
-            "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", "E_TATSU7", "ipfutil", "LgVndPluginHost", 
-            "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
-            "PushNotificationsLongRunningTask", "RtkAudUService",
-            "AdobeCollabSync", "aihost", "LenovoFaceFilter", "SmartAppearance", "SmartAppearanceService", 
-            "splwow64", "SenaryAudioApp"
+            "FortiClient-Taskbar", "FortiClient", "taskhostex", "ShellHost", "ShowOSD", "WidgetService", 
+            "smartscreen", "SecurityHealthSystray", "WindowsPackageManagerServer", "svchost", "SearchProtocolHost", 
+            "OutlookComm.*", "PhoneExperienceHost", "PhoneLink", "UserOOBEBroker", "ApplicationFrameHost", 
+            "CompPkgSrv", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", 
+            "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
+            "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
+            # Jalur Regex Agresif untuk Vendor Hardware & Audio
+            "Lenovo.*", "Intel.*", "igfx.*", "RtkAud.*", "Realtek.*", "FMAPP"
         ) -join "|"
 
         if ($TasklistRaw) {
@@ -209,7 +205,7 @@ try {
                     $ProcName = $ProcNameWithExe -replace "\.exe$", ""
                     $ProcId   = $Matches[2]
 
-                    # Filter out jika nama proses cocok dengan blacklist agresif
+                    # Filter out jika nama proses cocok dengan blacklist massal
                     if ($ProcName -match "^($UserBlacklist)$") { continue }
 
                     # Ambil deskripsi asli aplikasi
@@ -223,7 +219,7 @@ try {
 
                     $ContextInfo = "Aplikasi Aktif"
                     
-                    # Pemetaan intelijen label aplikasi kerja umum (PASTIKAN SELURUHNYA ELSEIF)
+                    # Pemetaan intelijen label aplikasi kerja umum
                     if ($ProcName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
@@ -236,7 +232,7 @@ try {
                     }
                     elseif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
                     elseif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
-                    elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
+                    elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot") { $ContextInfo = "Layanan Latar Belakang" }
                     elseif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
                     elseif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
                     elseif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
@@ -247,6 +243,7 @@ try {
                     elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
                     elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
+                    elseif ($ProcName -match "zoom") { $ContextInfo = "Zoom Meeting Client" }
                     elseif ($ProcName -match "forticlient|fortisslvpnclient") {
                         $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
                         $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
