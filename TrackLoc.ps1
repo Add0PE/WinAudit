@@ -147,51 +147,77 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (SYSTEM SESSION-AWARE VERSION) ---
+# --- DETEKSI AKTIVITAS USER (USER-SESSION OVERRIDES - SYSTEM COMPLIANT) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
     $ValidApps = New-Object System.Collections.ArrayList
 
-    # 1. BLACKLIST UTAMA: Saring proses sistem inti yang terkadang bocor ke Session 1
-    $OsBlacklist = "^(Idle|System|SecureSystem|Secure System|Registry|Memory\sCompression|MemoryCompression|vmmem|explorer|svchost|lsass|csrss|wininit|services|spoolsv|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|WmiPrvSE|conhost|dllhost|igfx.*|nv.*|ServiceHub.*|SearchIndexer|SearchApp|JavaService|AcroCEF|javaw|TextInputHost|klnagent|avp|dwm|ALEService|MuMuVMMHeadless|MuMuNxDevice|MuMuNxMain|LockApp|sihost|Widgets|CrossDeviceResume|SenaryAudioApp|ctfmon|smartscreen|taskhostw|SecurityHealthService|USOClient)$"
-
-    # 2. Ambil semua proses yang AKTIF DI LAYAR USER (SessionId > 0)
-    # Ini adalah kunci utama agar skrip yang dijalankan oleh SYSTEM tetap bisa menangkap aplikasi user!
-    $AllProcesses = Get-Process -ErrorAction SilentlyContinue | Where-Object { 
-        $_.SessionId -gt 0 -and $_.ProcessName -notmatch $OsBlacklist
+    # 1. Cari tahu siapa nama user yang sedang aktif di layar (Session Interaktif)
+    $ActiveUser = $null
+    
+    # Ambil via query session explorer (Metode Teraman untuk SYSTEM)
+    $Explorers = Get-CimInstance Win32_Process -Filter "Name = 'explorer.exe'" -ErrorAction SilentlyContinue
+    if ($Explorers) {
+        foreach ($Exp in $Explorers) {
+            $OwnerInfo = Invoke-CimMethod -InputObject $Exp -MethodName GetOwner -ErrorAction SilentlyContinue
+            if ($OwnerInfo -and $OwnerInfo.User -notmatch "^(SYSTEM|LOCAL SERVICE|NETWORK SERVICE|DWM-.*|UMFD-.*)$") {
+                $ActiveUser = $OwnerInfo.User
+                break
+            }
+        }
     }
 
-    # 3. Periksa aktivitas proses satu per satu
-    foreach ($Proc in $AllProcesses) {
-        try {
-            $AppName = $Proc.Description
-            if ([string]::IsNullOrWhiteSpace($AppName)) {
-                $AppName = $Proc.ProcessName
+    # Jika metode explorer gagal, gunakan fallback quser bawaan Windows
+    if ([string]::IsNullOrWhiteSpace($ActiveUser)) {
+        $QuserResult = quser 2>$null
+        if ($QuserResult) {
+            foreach ($Line in $QuserResult) {
+                if ($Line -match '>\s*([a-zA-Z0-9\.\-_]+)\s+') {
+                    $ActiveUser = $Matches[1]
+                    break
+                }
             }
+        }
+    }
 
-            # JALUR UTAMA: Deteksi visual Window Handle (Jika dijalankan interaktif/Admin)
-            $HasWindow = $Proc.MainWindowHandle
-            $Title = $Proc.MainWindowTitle
+    # 2. Jika nama user aktif ditemukan, tarik proses secara spesifik berdasarkan nama user tersebut!
+    if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
+        
+        # Blacklist aplikasi bawaan user yang berupa background noise
+        $UserBlacklist = "^(explorer|SearchHost|StartMenuExperienceHost|RuntimeBroker|ShellExperienceHost|conhost|dllhost|TextInputHost|ctfmon|taskhostw|LockApp|sihost|Widgets)$"
 
-            if ($HasWindow -and $HasWindow -ne 0 -and $HasWindow -ne [IntPtr]::Zero -and (-not [string]::IsNullOrWhiteSpace($Title))) {
-                
-                $ContextTitle = $Title
-                if ($Proc.ProcessName -eq "OUTLOOK") {
-                    $ContextTitle = $Title -replace " - Outlook", ""
+        # Tarik proses HANYA milik user aktif tersebut (Menembus batasan Get-Process bawaan SYSTEM)
+        $AllProcesses = Get-Process -IncludeUserName -ErrorAction SilentlyContinue | Where-Object { 
+            $_.UserName -match $ActiveUser -and $_.ProcessName -notmatch $UserBlacklist
+        }
+
+        # Jika opsi -IncludeUserName diblokir oleh kebijakan hak akses di PC tersebut, gunakan fallback alternatif CIM/WMI
+        if (-not $AllProcesses) {
+            $UserProcessesIds = @()
+            $CimProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
+            foreach ($P in $CimProcesses) {
+                $Owner = Invoke-CimMethod -InputObject $P -MethodName GetOwner -ErrorAction SilentlyContinue
+                if ($Owner.User -eq $ActiveUser) {
+                    $UserProcessesIds += $P.ProcessId
+                }
+            }
+            if ($UserProcessesIds) {
+                $AllProcesses = Get-Process -Id $UserProcessesIds -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -notmatch $UserBlacklist }
+            }
+        }
+
+        # 3. Evaluasi proses milik user yang berhasil ditarik
+        foreach ($Proc in $AllProcesses) {
+            try {
+                $AppName = $Proc.Description
+                if ([string]::IsNullOrWhiteSpace($AppName)) {
+                    $AppName = $Proc.ProcessName
                 }
 
-                $TempObj = [PSCustomObject]@{
-                    Name  = $AppName
-                    Title = $ContextTitle
-                }
-                [void]$ValidApps.Add($TempObj)
-            } 
-            # JALUR CADANGAN: DIEKSEKUSI OLEH SYSTEM (Membaca proses Session 1 tanpa limitasi RAM)
-            else {
                 $ContextInfo = "Aplikasi Aktif"
                 
-                # Berikan label pintar untuk aplikasi kerja umum yang sudah kita ketahui
+                # Pemetaan label pintar aplikasi kerja umum
                 if ($Proc.ProcessName -match "excel|winword|powerpnt|notepad") {
                     try {
                         $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($Proc.Id)" -ErrorAction SilentlyContinue).CommandLine
@@ -218,7 +244,6 @@ try {
                     $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
                 }
                 else {
-                    # Otomatis menangkap aplikasi ilegal / tidak terdaftar yang dibuka user
                     $ContextInfo = "Proses Tidak Terdaftar"
                 }
 
@@ -227,26 +252,23 @@ try {
                     Title = $ContextInfo
                 }
                 [void]$ValidApps.Add($TempObj)
-            } 
-        } catch { continue } 
-    } 
 
-    # 4. KONSOLIDASI LOGIKA (ANTI-DUPLIKAT & DISPLAY)
+            } catch { continue }
+        }
+    }
+
+    # 4. KONSOLIDASI LOGIKA DISPLAY
     if ($ValidApps.Count -gt 0) {
         $GroupedApps = $ValidApps | Group-Object Name
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Browser Aktif|Email Active|Layanan Latar Belakang|Dokumen Terbuka|Remote Desktop Aktif|Konsol PowerShell|WhatsApp Messenger|Remote Akses|Audit Lockout User|Windows Task Manager|Membuka Dokumen PDF|VPN Connected|VPN Disconnected|Emulator Android Aktif|Proses Tidak Terdaftar)$" } | Select-Object -First 1
-            
-            if (-not $BestRecord) {
-                $BestRecord = $Group.Group | Select-Object -First 1
-            }
+            $BestRecord = $Group.Group | Select-Object -First 1
 
             $CleanAppName = $BestRecord.Name
             $CleanTitle   = $BestRecord.Title
 
-            # Sanitisasi String Murni
+            # Sanitisasi String Murni Markdown
             $DangerousChars = @('*', '_', '`', '[', ']', '(', ')', '#', '-')
             foreach ($Char in $DangerousChars) {
                 $CleanAppName = $CleanAppName.Replace($Char, '')
@@ -260,10 +282,10 @@ try {
 
         $CurrentActivity = ($AppLines | Sort-Object) -join "`n"
     } else {
-        $CurrentActivity = "• No Active GUI Window"
+        $CurrentActivity = "• No Active GUI Window (User: $ActiveUser)"
     }
 
-} catch { $CurrentActivity = "• Debug: $($_.Exception.Message)" }
+} catch { $CurrentActivity = "• Debug Error: $($_.Exception.Message)" }
 
 # --- LOGIKA TAMPILAN LOKASI ---
 if (!$Location.IsUnknown) {
