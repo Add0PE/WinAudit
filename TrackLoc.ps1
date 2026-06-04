@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - DEP CLEAN FILTER VERSION) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - PERIPHERAL & SERVICE FILTER - RE-VALIDATED) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,12 +178,12 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN EXTRA REGEX UNTUK SUB-PROCESS
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER AGRESIF TAMBAHAN
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # BLACKLIST UPGRADED: Menyapu bersih sub-Lenovo Heartbeat, PromeCEF, PushNotification, dan varian audio/grafis
+        # BLACKLIST UPGRADED: Menyaring AdobeCollab, AI Host, Lenovo Smart Appearance, Print Driver, Senary Audio
         $UserBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -197,7 +197,9 @@ try {
             "LenovoVantageThinkSmartSenseAddin", "LenovoVantageDeviceSettingsHeartbeatAddin", "prevhost", "OneDriveSetUp", 
             "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", "E_TATSU7", "ipfutil", "LgVndPluginHost", 
             "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
-            "PushNotificationsLongRunningTask", "RtkAudUService"
+            "PushNotificationsLongRunningTask", "RtkAudUService",
+            "AdobeCollabSync", "aihost", "LenovoFaceFilter", "SmartAppearance", "SmartAppearanceService", 
+            "splwow64", "SenaryAudioApp"
         ) -join "|"
 
         if ($TasklistRaw) {
@@ -221,7 +223,7 @@ try {
 
                     $ContextInfo = "Aplikasi Aktif"
                     
-                    # Pemetaan intelijen label aplikasi kerja umum
+                    # Pemetaan intelijen label aplikasi kerja umum (PASTIKAN SELURUHNYA ELSEIF)
                     if ($ProcName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
