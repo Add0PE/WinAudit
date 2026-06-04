@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - SPECIFIC EXTRA CLEAN FILTER) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - PERIPHERAL & SERVICE FILTER) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,12 +178,12 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER TAMBAHAN KHUSUS
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER PERIPHERAL & UTILLITY KHUSUS
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # BLACKLIST DIALIRKAN & DIPERLUAS: Memasukkan OOBE, ApplicationFrameHost, sub-Lenovo, sub-OneDrive, dll.
+        # BLACKLIST DIPERLUAS: Menyaring Epson, Intel Framework, Lenovo DataCenter, Copilot Starter, dll.
         $UserBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -194,7 +194,9 @@ try {
             "SearchProtocolHost", "OutlookComm.*", "PhoneExperienceHost", "PhoneLink",
             "UserOOBEBroker", "ApplicationFrameHost", "CompPkgSrv", "LenovoVantageGenericMessagingAddin", 
             "LenovoVantageLenovoSecurityAddin", "LenovoVantageLenovoServiceBridgeAddin", "LenovoVantageSmartInteractAddin", 
-            "LenovoVantageThinkSmartSenseAddin", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp"
+            "LenovoVantageThinkSmartSenseAddin", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp",
+            "AppActions", "EPDctrl", "E_TATSU7", "ipfutil", "LgVndPluginHost", "m365copilotautostarter", 
+            "CrossDeviceService", "SystemSettings"
         ) -join "|"
 
         if ($TasklistRaw) {
@@ -229,20 +231,21 @@ try {
                             }
                         } catch { $ContextInfo = "Dokumen Terbuka" }
                     }
-                    elseif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
-                    elseif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
-                    elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
-                    elseif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
-                    elseif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
-                    elseif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
-                    elseif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
-                    elseif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
-                    elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
-                    elseif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
-                    elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
-                    elseif ($ProcName -match "OneDrive") { $ContextInfo = "Cloud Sync Active" }
-                    elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
-                    elseif ($ProcName -match "forticlient|fortisslvpnclient") {
+                    elif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
+                    elif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
+                    elif ($ProcName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
+                    elif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
+                    elif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
+                    elif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
+                    elif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
+                    elif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
+                    elif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
+                    elif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
+                    elif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
+                    # Memastikan sinkronisasi hanya memunculkan core utama Microsoft OneDrive
+                    elif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
+                    elif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
+                    elif ($ProcName -match "forticlient|fortisslvpnclient") {
                         $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
                         $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
                     }
