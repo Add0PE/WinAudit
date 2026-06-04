@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (FINAL-CORE: ACCURATE FORTICLIENT FABRIC AGENT) ---
+# --- DETEKSI AKTIVITAS USER (FINAL-CORE: PROCESS-BASED VPN LIFECYCLE DETECTOR) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,7 +178,7 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER ENGINE TERBARU
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN ADVANCED PROCESS DETECTION
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
@@ -195,7 +195,9 @@ try {
             "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
             "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
             "FMAPP", "RtkAud.*", "Realtek.*", "OneDriveSyncService", "OneDriveStandaloneUpdater",
-            "MusNotifyIcon", "crashpadhandler", "MuMuNxDevice", "MuMuVMM", "MuMuVMMHeadless"
+            "MusNotifyIcon", "crashpadhandler", "MuMuNxDevice", "MuMuVMM", "MuMuVMMHeadless",
+            # Menyembunyikan engine enkripsinya agar tidak dobel muncul di laporan telegram
+            "fortissl", "fortissl64"
         ) -join "|"
 
         # FILTER KATA KUNCI KETAT VENDOR HARDWARE & AUDIO
@@ -254,13 +256,11 @@ try {
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "zoom") { $ContextInfo = "Zoom Meeting Client" }
                     
-                    # LOGIKA RE-OPTIMASI DETEKSI SEFC / FABRIC AGENT VPN
+                    # LOGIKA ENGINE BARU BERBASIS STATUS PROSES AKTIF RESIDEN ENKRIPSI
                     elseif ($ProcName -match "forticlient|fortisslvpnclient|FortiTray|FortiClientw") {
-                        $VpnInterface = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
-                            ($_.InterfaceDescription -match "Fortinet|Forti|SSL-VPN") -and ($_.Status -eq "Up") 
-                        }
+                        $SslTunnelActive = Get-Process -Name "fortissl", "fortissl64" -ErrorAction SilentlyContinue
                         
-                        if ($VpnInterface) {
+                        if ($SslTunnelActive) {
                             $ContextInfo = "VPN Connected"
                         } else {
                             $ContextInfo = "VPN Disconnected"
