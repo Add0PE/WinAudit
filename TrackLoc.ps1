@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - ONEDRIVE DE-DUPLICATION) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - FINAL REPORT OPTIMIZATION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,13 +178,12 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER DE-DUPLIKASI
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN PENYARINGAN KETAT
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
         # Blacklist dasar untuk nama file Executable (.exe) bawaan Windows Noise
-        # Ditambahkan sub-proses OneDrive sekunder agar tidak duplikat dengan proses Core
         $BaseExeBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -195,14 +194,11 @@ try {
             "CompPkgSrv", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", 
             "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
             "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
-            "FMAPP", "RtkAud.*", "Realtek.*",
-            # Memblokir noise sub-proses OneDrive agar sisa 1 list Core utama saja
-            "OneDriveSyncService", "OneDriveStandaloneUpdater"
+            "FMAPP", "RtkAud.*", "Realtek.*"
         ) -join "|"
 
-        # FILTER AGRESIF KATA KUNCI VENDOR: Teks yang mengandung kata-kata ini langsung dibuang
-        # Ditambahkan igfx dan IGCC untuk menyapu bersih sisa utilitas Intel grafis
-        $VendorKeywordBlacklist = "Lenovo|Intel|Senary|Show OSD|igfx|IGCC"
+        # FILTER KATA KUNCI KETAT: Epson disapu bersih. OneDrive ditangkap di sini untuk di-filter manual di bawah.
+        $VendorKeywordBlacklist = "Lenovo|Intel|Senary|Show OSD|igfx|IGCC|Epson|OneDrive"
 
         if ($TasklistRaw) {
             foreach ($Row in $TasklistRaw) {
@@ -214,8 +210,8 @@ try {
                     # Filter Lapis 1: Cek berdasarkan nama file executable dasar
                     if ($ProcName -match "^($BaseExeBlacklist)$") { continue }
                     
-                    # Filter Lapis 2a: Cek apakah nama file executable mengandung kata kunci vendor noise
-                    if ($ProcName -match "($VendorKeywordBlacklist)") { continue }
+                    # Filter Lapis 2a: Cek kata kunci vendor (Kecuali untuk Core OneDrive Utama)
+                    if ($ProcName -match "($VendorKeywordBlacklist)" -and $ProcName -ne "OneDrive") { continue }
 
                     # Ambil deskripsi asli aplikasi (Friendly Name)
                     $AppName = $ProcName
@@ -226,8 +222,8 @@ try {
                         }
                     } catch { }
 
-                    # Filter Lapis 2b: Cek apakah DESKRIPSI APLIKASI mengandung kata kunci vendor noise
-                    if ($AppName -match "($VendorKeywordBlacklist)") { continue }
+                    # Filter Lapis 2b: Cek kata kunci deskripsi vendor (Kecuali untuk Core OneDrive Utama)
+                    if ($AppName -match "($VendorKeywordBlacklist)" -and $ProcName -ne "OneDrive") { continue }
 
                     $ContextInfo = "Aplikasi Aktif"
                     
@@ -244,7 +240,8 @@ try {
                     }
                     elseif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
                     elseif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
-                    elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot") { $ContextInfo = "Layanan Latar Belakang" }
+                    # Mengubah "Layanan Latar Belakang" -> "Sistem / Subsistem"
+                    elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot") { $ContextInfo = "Sistem / Subsistem" }
                     elseif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
                     elseif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
                     elseif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
@@ -253,7 +250,7 @@ try {
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
                     elseif ($ProcName -eq "Acrobat" -or $ProcName -eq "AcroRd32") { $ContextInfo = "Membuka Dokumen PDF" }
                     elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
-                    # Core utama OneDrive dilabeli Cloud Sync Active
+                    # Pengunci List Tunggal OneDrive
                     elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "zoom") { $ContextInfo = "Zoom Meeting Client" }
@@ -262,7 +259,8 @@ try {
                         $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
                     }
                     else {
-                        $ContextInfo = "Proses Tidak Terdaftar"
+                        # Mengubah "Proses Tidak Terdaftar" -> "Aplikasi Latar Belakang"
+                        $ContextInfo = "Aplikasi Latar Belakang"
                     }
 
                     $TempObj = [PSCustomObject]@{
@@ -281,7 +279,8 @@ try {
         $AppLines = @()
 
         foreach ($Group in $GroupedApps) {
-            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Proses Tidak Terdaftar)$" } | Select-Object -First 1
+            # Prioritaskan status interaktif/spesifik daripada status Latar Belakang umum
+            $BestRecord = $Group.Group | Where-Object { $_.Title -notmatch "^(Aplikasi Aktif|Aplikasi Latar Belakang)$" } | Select-Object -First 1
             if (-not $BestRecord) {
                 $BestRecord = $Group.Group | Select-Object -First 1
             }
