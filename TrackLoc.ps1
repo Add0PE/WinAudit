@@ -315,7 +315,7 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "👤 *User:* $User`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "📊 *RESOURCE USAGE:*`n" +
-           "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %``n" +
+           "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
            "🔋 *Battery:* $BatteryString | *📶 *Network:* $NetUsage Kbps`n" +
            "⏱️ *Uptime:* $UptimeString`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
