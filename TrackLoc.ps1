@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - PERIPHERAL & SERVICE FILTER) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - PERIPHERAL & SERVICE FILTER - FIX ELIF) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -220,7 +220,7 @@ try {
 
                     $ContextInfo = "Aplikasi Aktif"
                     
-                    # Pemetaan intelijen label aplikasi kerja umum
+                    # Pemetaan intelijen label aplikasi kerja umum (Sudah dipastikan semua Menggunakan elseif)
                     if ($ProcName -match "excel|winword|powerpnt|notepad") {
                         try {
                             $CmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $ProcId" -ErrorAction SilentlyContinue).CommandLine
@@ -231,21 +231,20 @@ try {
                             }
                         } catch { $ContextInfo = "Dokumen Terbuka" }
                     }
-                    elif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
-                    elif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
-                    elif ($ProcName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
-                    elif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
-                    elif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
-                    elif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
-                    elif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
-                    elif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
-                    elif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
-                    elif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
-                    elif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
-                    # Memastikan sinkronisasi hanya memunculkan core utama Microsoft OneDrive
-                    elif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
-                    elif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
-                    elif ($ProcName -match "forticlient|fortisslvpnclient") {
+                    elseif ($ProcName -eq "OUTLOOK") { $ContextInfo = "Email Active" }
+                    elseif ($ProcName -match "^(chrome|msedge|brave|firefox)$") { $ContextInfo = "Browser Aktif" }
+                    elseif ($ProcName -match "msedgewebview2|msteams|M365Copilot|LenovoVantage") { $ContextInfo = "Layanan Latar Belakang" }
+                    elseif ($ProcName -eq "mstsc") { $ContextInfo = "Remote Desktop Aktif" }
+                    elseif ($ProcName -match "powershell") { $ContextInfo = "Konsol PowerShell" }
+                    elseif ($ProcName -match "whatsapp") { $ContextInfo = "WhatsApp Messenger" }
+                    elseif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
+                    elseif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
+                    elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
+                    elseif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
+                    elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
+                    elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
+                    elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
+                    elseif ($ProcName -match "forticlient|fortisslvpnclient") {
                         $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceDescription -match "Fortinet|Forti" -and $_.Status -eq "Up" }
                         $ContextInfo = if ($VpnAdapter) { "VPN Connected" } else { "VPN Disconnected" }
                     }
