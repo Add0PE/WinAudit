@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - DUAL-LAYER FILTER) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - ONEDRIVE DE-DUPLICATION) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,12 +178,13 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN VALIDASI FILTER DUA LAPIS
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER DE-DUPLIKASI
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
         # Blacklist dasar untuk nama file Executable (.exe) bawaan Windows Noise
+        # Ditambahkan sub-proses OneDrive sekunder agar tidak duplikat dengan proses Core
         $BaseExeBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
@@ -194,11 +195,14 @@ try {
             "CompPkgSrv", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", 
             "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
             "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
-            "FMAPP", "RtkAud.*", "Realtek.*"
+            "FMAPP", "RtkAud.*", "Realtek.*",
+            # Memblokir noise sub-proses OneDrive agar sisa 1 list Core utama saja
+            "OneDriveSyncService", "OneDriveStandaloneUpdater"
         ) -join "|"
 
-        # FILTER AGRESIF KATA KUNCI VENDOR: Teks yang mengandung kata-kata ini pada Nama .exe MAUPUN Deskripsi akan dibuang!
-        $VendorKeywordBlacklist = "Lenovo|Intel|Senary|Show OSD"
+        # FILTER AGRESIF KATA KUNCI VENDOR: Teks yang mengandung kata-kata ini langsung dibuang
+        # Ditambahkan igfx dan IGCC untuk menyapu bersih sisa utilitas Intel grafis
+        $VendorKeywordBlacklist = "Lenovo|Intel|Senary|Show OSD|igfx|IGCC"
 
         if ($TasklistRaw) {
             foreach ($Row in $TasklistRaw) {
@@ -222,7 +226,7 @@ try {
                         }
                     } catch { }
 
-                    # Filter Lapis 2b: Cek apakah DESKRIPSI APLIKASI mengandung kata kunci vendor noise (SOLUSI UTAMA)
+                    # Filter Lapis 2b: Cek apakah DESKRIPSI APLIKASI mengandung kata kunci vendor noise
                     if ($AppName -match "($VendorKeywordBlacklist)") { continue }
 
                     $ContextInfo = "Aplikasi Aktif"
@@ -249,6 +253,7 @@ try {
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
                     elseif ($ProcName -eq "Acrobat" -or $ProcName -eq "AcroRd32") { $ContextInfo = "Membuka Dokumen PDF" }
                     elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
+                    # Core utama OneDrive dilabeli Cloud Sync Active
                     elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "zoom") { $ContextInfo = "Zoom Meeting Client" }
