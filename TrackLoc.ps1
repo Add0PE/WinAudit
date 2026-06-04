@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - AGGRESSIVE VENDOR CLEAN) ---
+# --- DETEKSI AKTIVITAS USER (NATIVE TASKLIST - DUAL-LAYER FILTER) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,13 +178,13 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER MASSAL VENDOR
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN VALIDASI FILTER DUA LAPIS
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
-        # BLACKLIST MASSAL: Mematikan semua variasi Lenovo, Intel, Realtek, Adobe Sync, dan Windows Noise
-        $UserBlacklist = @(
+        # Blacklist dasar untuk nama file Executable (.exe) bawaan Windows Noise
+        $BaseExeBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
             "avp", "avpui", "backgroundTaskHost", "crashhelper", "CrossDeviceResume", "ETDctrl", "ETDControlCenter",
@@ -194,9 +194,11 @@ try {
             "CompPkgSrv", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", 
             "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
             "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
-            # Jalur Regex Agresif untuk Vendor Hardware & Audio
-            "Lenovo.*", "Intel.*", "igfx.*", "RtkAud.*", "Realtek.*", "FMAPP"
+            "FMAPP", "RtkAud.*", "Realtek.*"
         ) -join "|"
+
+        # FILTER AGRESIF KATA KUNCI VENDOR: Teks yang mengandung kata-kata ini pada Nama .exe MAUPUN Deskripsi akan dibuang!
+        $VendorKeywordBlacklist = "Lenovo|Intel|Senary|Show OSD"
 
         if ($TasklistRaw) {
             foreach ($Row in $TasklistRaw) {
@@ -205,10 +207,13 @@ try {
                     $ProcName = $ProcNameWithExe -replace "\.exe$", ""
                     $ProcId   = $Matches[2]
 
-                    # Filter out jika nama proses cocok dengan blacklist massal
-                    if ($ProcName -match "^($UserBlacklist)$") { continue }
+                    # Filter Lapis 1: Cek berdasarkan nama file executable dasar
+                    if ($ProcName -match "^($BaseExeBlacklist)$") { continue }
+                    
+                    # Filter Lapis 2a: Cek apakah nama file executable mengandung kata kunci vendor noise
+                    if ($ProcName -match "($VendorKeywordBlacklist)") { continue }
 
-                    # Ambil deskripsi asli aplikasi
+                    # Ambil deskripsi asli aplikasi (Friendly Name)
                     $AppName = $ProcName
                     try {
                         $LiveProc = Get-Process -Id $ProcId -ErrorAction SilentlyContinue
@@ -216,6 +221,9 @@ try {
                             $AppName = $LiveProc.Description
                         }
                     } catch { }
+
+                    # Filter Lapis 2b: Cek apakah DESKRIPSI APLIKASI mengandung kata kunci vendor noise (SOLUSI UTAMA)
+                    if ($AppName -match "($VendorKeywordBlacklist)") { continue }
 
                     $ContextInfo = "Aplikasi Aktif"
                     
@@ -239,7 +247,7 @@ try {
                     elseif ($ProcName -eq "anydesk") { $ContextInfo = "Remote Akses" }
                     elseif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
-                    elseif ($ProcName -eq "Acrobat") { $ContextInfo = "Membuka Dokumen PDF" }
+                    elseif ($ProcName -eq "Acrobat" -or $ProcName -eq "AcroRd32") { $ContextInfo = "Membuka Dokumen PDF" }
                     elseif ($ProcName -match "MuMuPlayer") { $ContextInfo = "Emulator Android Aktif" }
                     elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
