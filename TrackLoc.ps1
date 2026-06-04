@@ -147,7 +147,7 @@ try {
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location" -Name "Value" -Value "Deny" -ErrorAction SilentlyContinue
 } catch {}
 
-# --- DETEKSI AKTIVITAS USER (FINAL-CORE: VPN SENSOR & VM CONSOLIDATION) ---
+# --- DETEKSI AKTIVITAS USER (FINAL-CORE: ACCURATE FORTICLIENT FABRIC AGENT) ---
 $CurrentActivity = "• No Active GUI Window"
 
 try {
@@ -178,28 +178,24 @@ try {
         }
     }
 
-    # 2. EKSEKUSI JALUR TASKLIST DENGAN ADVANCED VPN & EMULATOR FILTER
+    # 2. EKSEKUSI JALUR TASKLIST DENGAN FILTER ENGINE TERBARU
     if (-not [string]::IsNullOrWhiteSpace($ActiveUser)) {
         
         $TasklistRaw = tasklist /FI "USERNAME eq $ActiveUser" /FO CSV /NH 2>$null
         
         # Blacklist dasar untuk nama file Executable (.exe) bawaan Windows Noise
-        # Ditambahkan noise Mumu, MusNotifyIcon, dan crashpadhandler
         $BaseExeBlacklist = @(
             "explorer", "SearchHost", "StartMenuExperienceHost", "RuntimeBroker", "ShellExperienceHost",
             "conhost", "dllhost", "TextInputHost", "ctfmon", "taskhostw", "LockApp", "sihost", "Widgets",
             "avp", "avpui", "backgroundTaskHost", "crashhelper", "CrossDeviceResume", "ETDctrl", "ETDControlCenter",
-            "FortiClient-Taskbar", "FortiClient", "taskhostex", "ShellHost", "ShowOSD", "WidgetService", 
+            "FortiClient-Taskbar", "taskhostex", "ShellHost", "ShowOSD", "WidgetService", 
             "smartscreen", "SecurityHealthSystray", "WindowsPackageManagerServer", "svchost", "SearchProtocolHost", 
             "OutlookComm.*", "PhoneExperienceHost", "PhoneLink", "UserOOBEBroker", "ApplicationFrameHost", 
             "CompPkgSrv", "prevhost", "OneDriveSetUp", "FileCoAuth", "SearchApp", "AppActions", "EPDctrl", 
             "E_TATSU7", "m365copilotautostarter", "CrossDeviceService", "SystemSettings", "PromeCEFSubProcess", 
             "PushNotificationsLongRunningTask", "AdobeCollabSync", "aihost", "splwow64", "LocationNotificationWindows",
             "FMAPP", "RtkAud.*", "Realtek.*", "OneDriveSyncService", "OneDriveStandaloneUpdater",
-            # Pembersih Noise Sesuai Instruksi Baru Avi
-            "MusNotifyIcon", "crashpadhandler",
-            # Memblokir Sub-Proses Pembantu MuMu agar sisa 1 list inti (MuMuNxMain) saja
-            "MuMuNxDevice", "MuMuVMM", "MuMuVMMHeadless"
+            "MusNotifyIcon", "crashpadhandler", "MuMuNxDevice", "MuMuVMM", "MuMuVMMHeadless"
         ) -join "|"
 
         # FILTER KATA KUNCI KETAT VENDOR HARDWARE & AUDIO
@@ -253,20 +249,22 @@ try {
                     elseif ($ProcName -eq "LockoutStatus") { $ContextInfo = "Audit Lockout User" }
                     elseif ($ProcName -eq "Taskmgr") { $ContextInfo = "Windows Task Manager" }
                     elseif ($ProcName -eq "Acrobat" -or $ProcName -eq "AcroRd32") { $ContextInfo = "Membuka Dokumen PDF" }
-                    # Core Utama Emulator MuMu dialirkan ke sini
                     elseif ($ProcName -match "MuMuNxMain") { $ContextInfo = "Emulator Android Aktif" }
                     elseif ($ProcName -eq "OneDrive") { $ContextInfo = "Cloud Sync Active" }
                     elseif ($ProcName -match "saplogon") { $ContextInfo = "ERP Client" }
                     elseif ($ProcName -match "zoom") { $ContextInfo = "Zoom Meeting Client" }
-                    # LOGIKA FIX ULTRA-SENSITIF UNTUK FORTICLIENT VPN DETECTOR
-                    elseif ($ProcName -match "forticlient|fortisslvpnclient|FortiTray") {
-                        # Kombinasi: Cek adapter fisik/virtual up DAN rute IP aktif milik Fortinet
-                        $VpnAdapter = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
-                            ($_.InterfaceDescription -match "Fortinet|Forti|SSL-VPN|Virtual Ethernet Adapter") -and ($_.Status -eq "Up") 
+                    
+                    # LOGIKA RE-OPTIMASI DETEKSI SEFC / FABRIC AGENT VPN
+                    elseif ($ProcName -match "forticlient|fortisslvpnclient|FortiTray|FortiClientw") {
+                        $VpnInterface = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
+                            ($_.InterfaceDescription -match "Fortinet|Forti|SSL-VPN") -and ($_.Status -eq "Up") 
                         }
-                        $VpnRoute = Get-NetRoute -ErrorAction SilentlyContinue | Where-Object { $_.NextHop -match "10\..*|172\.(1[6-9]|2[0-9]|3[0-1])\..*|192\.168\..*" -and $_.InterfaceMetric -le 100 }
                         
-                        $ContextInfo = if ($VpnAdapter -or $VpnRoute) { "VPN Connected" } else { "VPN Disconnected" }
+                        if ($VpnInterface) {
+                            $ContextInfo = "VPN Connected"
+                        } else {
+                            $ContextInfo = "VPN Disconnected"
+                        }
                     }
 
                     $TempObj = [PSCustomObject]@{
