@@ -323,7 +323,7 @@ if (!$Location.IsUnknown) {
 
 # --- PESAN (SUSUNAN TETAP) ---
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
-$Message = @"📍 *AUDIT DEVICE REPORT*`n" +
+$Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💻 *Hostname:* $Hostname`n" +
            "🔢 *Serial Number:* $SN`n" +
@@ -346,7 +346,7 @@ $Message = @"📍 *AUDIT DEVICE REPORT*`n" +
            "🎯 *Location Accuracy:* $Acc meter`n" +
            "⏰ *Report Sent:* $Timestamp`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
-           "🔗 [GMAPS - Device Location]($MapsLink)"@
+           "🔗 [GMAPS - Device Location]($MapsLink)"
 
 # Konversi string menjadi Base64 murni (Aman dari segala distorsi encoding)
 $utf8Bytes   = [System.Text.Encoding]::UTF8.GetBytes($Message)
