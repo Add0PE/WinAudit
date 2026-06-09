@@ -323,7 +323,7 @@ if (!$Location.IsUnknown) {
 
 # --- PESAN (SUSUNAN TETAP) ---
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
-$Message = "📍 *AUDIT DEVICE REPORT*`n" +
+$Message = @"📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💻 *Hostname:* $Hostname`n" +
            "🔢 *Serial Number:* $SN`n" +
@@ -346,20 +346,25 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "🎯 *Location Accuracy:* $Acc meter`n" +
            "⏰ *Report Sent:* $Timestamp`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
-           "🔗 [GMAPS - Device Location]($MapsLink)"
+           "🔗 [GMAPS - Device Location]($MapsLink)"@
 
-# PAKSA konversi string laporan menjadi Byte Array berbasis UTF-8 murni
+# Paksa konversi string laporan menjadi Byte Array berbasis UTF-8 murni
 $utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($Message)
 
-# Kirim ke Cloudflare Gateway menggunakan header keamanan kustom Anda
+# Kirim ke Cloudflare Gateway menggunakan Invoke-WebRequest (Lebih Stabil untuk Byte Stream)
 $urlGateway = "https://win-audit-gateway.addohika.workers.dev"
 $headers = @{
     "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026"
 }
 
 try {
-    # Kirim payload dalam bentuk byte array ($utf8Bytes), bukan string mentah
-    Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $utf8Bytes -ContentType "application/octet-stream"
+    # Menggunakan Invoke-WebRequest untuk memastikan byte stream terkirim utuh tanpa terpotong
+    $response = Invoke-WebRequest -Uri $urlGateway -Method Post -Headers $headers -Body $utf8Bytes -ContentType "application/octet-stream" -ErrorAction Stop
+    Write-Host "Respon dari Gateway: $($response.Content)" -ForegroundColor Green
 } catch {
     Write-Warning "Gagal mengirim laporan: $_"
+    if ($_.Exception.Response) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        Write-Host "Detail Error Server: $($reader.ReadToEnd())" -ForegroundColor Red
+    }
 }
