@@ -323,7 +323,7 @@ if (!$Location.IsUnknown) {
 
 # --- PESAN (SUSUNAN TETAP) ---
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
-$Message = "📍 *AUDIT DEVICE REPORT*`n" +
+$Message = @"📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💻 *Hostname:* $Hostname`n" +
            "🔢 *Serial Number:* $SN`n" +
@@ -346,18 +346,18 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "🎯 *Location Accuracy:* $Acc meter`n" +
            "⏰ *Report Sent:* $Timestamp`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
-           "🔗 [GMAPS - Device Location]($MapsLink)"
+           "🔗 [GMAPS - Device Location]($MapsLink)"@
 
-# 2. Konversi string menjadi Base64 murni (Aman dari segala distorsi encoding)
+# Konversi string menjadi Base64 murni (Aman dari segala distorsi encoding)
 $utf8Bytes   = [System.Text.Encoding]::UTF8.GetBytes($Message)
 $base64Text  = [Convert]::ToBase64String($utf8Bytes)
 
-# 3. Bungkus ke dalam format JSON payload
+# Bungkus ke dalam format JSON payload
 $bodyJson = @{
     data = $base64Text
 } | ConvertTo-Json -Compress
 
-# 4. Kirim ke Cloudflare Gateway
+# Kirim ke Cloudflare Gateway
 $urlGateway = "https://win-audit-gateway.addohika.workers.dev"
 $headers = @{
     "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026"
