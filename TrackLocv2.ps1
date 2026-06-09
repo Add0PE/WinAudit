@@ -323,6 +323,13 @@ if (!$Location.IsUnknown) {
 
 # --- PESAN (SUSUNAN TETAP) ---
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
+
+# ====================================================================
+# FORCE POWERSHELL SESSION TO USE UTF-8 GLOBAL (TARUH DI BARIS 1)
+# ====================================================================
+[console]::InputEncoding = [System.Text.Encoding]::UTF8
+[console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💻 *Hostname:* $Hostname`n" +
@@ -348,33 +355,12 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🔗 [GMAPS - Device Location]($MapsLink)"
 
-# ====================================================================
-# PERBAIKAN UTAMA: PAKSA MEMORI POWERSHELL MENERJEMAHKAN KE UTF-8
-# ====================================================================
-# Langkah A: Ambil byte asli dari string berbasis encoding lokal (ANSI)
-$ansiBytes = [System.Text.Encoding]::Default.GetBytes($Message)
-
-# Langkah B: Terjemahkan byte ANSI tersebut menjadi Byte Array UTF-8 yang bersih
-$utf8Bytes = [System.Text.Encoding]::Convert([System.Text.Encoding]::Default, [System.Text.Encoding]::UTF8, $ansiBytes)
-
-# Langkah C: Baru ubah Byte UTF-8 yang sudah bersih tadi menjadi Base64
+# Proses pengiriman Base64 standar Anda yang sebelumnya (Sangat simpel):
+$utf8Bytes  = [System.Text.Encoding]::UTF8.GetBytes($Message)
 $base64Text = [Convert]::ToBase64String($utf8Bytes)
-# ====================================================================
+$bodyJson   = @{ data = $base64Text } | ConvertTo-Json -Compress
 
-# 2. Bungkus ke dalam format JSON payload
-$bodyJson = @{
-    data = $base64Text
-} | ConvertTo-Json -Compress
-
-# 3. Kirim ke Cloudflare Gateway Anda
 $urlGateway = "https://win-audit-gateway.addohika.workers.dev"
-$headers = @{
-    "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026"
-}
+$headers    = @{ "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026" }
 
-try {
-    Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $bodyJson -ContentType "application/json; charset=utf-8" -ErrorAction Stop | Out-Null
-    Write-Host "Laporan sukses terkirim dengan Enkripsi Memori Terbuka!" -ForegroundColor Green
-} catch {
-    Write-Warning "Gagal mengirim laporan: $_"
-}
+Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $bodyJson -ContentType "application/json; charset=utf-8"
