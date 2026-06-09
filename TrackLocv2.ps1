@@ -327,9 +327,9 @@ $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
 # ====================================================================
 # FORCE POWERSHELL SESSION TO USE UTF-8 GLOBAL (TARUH DI BARIS 1)
 # ====================================================================
-[console]::InputEncoding = [System.Text.Encoding]::UTF8
-[console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
+#[console]::InputEncoding = [System.Text.Encoding]::UTF8
+#[console]::OutputEncoding = [System.Text.Encoding]::UTF8
+#$OutputEncoding = [System.Text.Encoding]::UTF8
 $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💻 *Hostname:* $Hostname`n" +
@@ -355,7 +355,7 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🔗 [GMAPS - Device Location]($MapsLink)"
 
-# Proses pengiriman Base64 standar Anda yang sebelumnya (Sangat simpel):
+# 2. Proses Base64 & Kirim ke Cloudflare (Tetap sama seperti kemarin)
 $utf8Bytes  = [System.Text.Encoding]::UTF8.GetBytes($Message)
 $base64Text = [Convert]::ToBase64String($utf8Bytes)
 $bodyJson   = @{ data = $base64Text } | ConvertTo-Json -Compress
@@ -363,4 +363,9 @@ $bodyJson   = @{ data = $base64Text } | ConvertTo-Json -Compress
 $urlGateway = "https://win-audit-gateway.addohika.workers.dev"
 $headers    = @{ "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026" }
 
-Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $bodyJson -ContentType "application/json; charset=utf-8"
+try {
+    Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $bodyJson -ContentType "application/json; charset=utf-8" -ErrorAction Stop | Out-Null
+    Write-Host "Laporan format baru sukses dikirim!" -ForegroundColor Green
+} catch {
+    Write-Warning "Gagal mengirim: $_"
+}
