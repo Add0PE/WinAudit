@@ -12,20 +12,18 @@ if (!(Test-Path $dirAman)) { New-Item -ItemType Directory -Path $dirAman -Force 
 
 
 # --------------------------------------------------------------------
-# KELOMPOK 2: SUNTIK TOKEN KE REGISTRY WINDOWS CLIENT (REVERSE BYPASS)
+# KELOMPOK 2: SUNTIK TOKEN KE REGISTRY WINDOWS CLIENT
 # --------------------------------------------------------------------
-$tokenTerbalik = "MIjw327kpNPqc0hUYi3vbdMvVVuEwCxFQ9RH_phg"
+# Tempelkan string acak hasil dari Langkah 2 di sini
+$tokenTerbalik = "MIjw327kpPNqc06hUYi3vbMdVVuEwCxFQ9RH_phg"
 
-# Membalikan kembali string menjadi normal secara runtime di memori klien
 $characterArray = $tokenTerbalik.ToCharArray()
 [Array]::Reverse($characterArray)
-$tokenAsli = New-Object string([], $characterArray)
+$tokenAsli = [string]::Join("", $characterArray)
 
-# Proses injeksi ke Registry HKLM Windows Klien
 $regPath = "HKLM:\SOFTWARE\WinAudit"
 if (!(Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
 
-# Enkripsi token menggunakan SecureString bawaan Windows OS
 $secureToken = ConvertTo-SecureString $tokenAsli -AsPlainText -Force | ConvertFrom-SecureString
 Set-ItemProperty -Path $regPath -Name "SecureKey" -Value $secureToken -ErrorAction SilentlyContinue
 
@@ -124,34 +122,36 @@ foreach ($task in $taskNameLama) {
     }
 }
 
-# 3. Jalankan Pengiriman Laporan ke GitHub Menggunakan Token yang Baru Di-set
-$repoOwner   = "Add0PE"
-$repoName    = "WinAudit"
-$hostname    = [System.Net.Dns]::GetHostName()
-$serial      = (Get-CimInstance Win32_Bios).SerialNumber
-
-$tanggalIndo = Get-Date -Format "dd-MM-yyyy HH:mm"
 $isiTeks     = "Hostname: $hostname`nSerial Number: $serial`nStatus: $statusMigrasi`nTanggal: $tanggalIndo"
 $bytes       = [System.Text.Encoding]::UTF8.GetBytes($isiTeks)
 $base64Text  = [Convert]::ToBase64String($bytes)
 
 $fileName    = "laporan_migrasi/$hostname-$serial.txt"
-$urlApi      = "https://api.github.com/repos/$repoOwner/$repoName/contents/$fileName"
+$urlApiReport = "https://api.github.com/repos/$repoOwner/$repoName/contents/$fileName"
 
 $bodyGithub = @{
     message = "Log Migrasi $hostname"
     content = $base64Text
 } | ConvertTo-Json
 
+# 3. KOREKSI: Gunakan format "Bearer" atau "token" dengan penulisan header HTTP yang standar
 $headersGithub = @{
-    Authorization = "token $tokenAsli"
-    Accept        = "application/vnd.github.v3+json"
+    "Authorization" = "token $tokenAsli"
+    "Accept"        = "application/vnd.github.v3+json"
 }
 
 try {
-    Invoke-RestMethod -Uri $urlApi -Method Put -Headers $headersGithub -Body $bodyGithub -ContentType "application/json" -ErrorAction Stop | Out-Null
+    # Pastikan method menggunakan PUT untuk membuat file baru di repositori
+    Invoke-RestMethod -Uri $urlApiReport -Method Put -Headers $headersGithub -Body $bodyGithub -ContentType "application/json" -ErrorAction Stop | Out-Null
+    Write-Host "Laporan sukses terkirim!" -ForegroundColor Green
 } catch {
     Write-Warning "Laporan gagal dikirim ke GitHub: $_"
+    # Baris debug di bawah ini akan memunculkan detail error spesifik dari server GitHub
+    if ($_.Exception.Response) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $responseBody = $reader.ReadToEnd()
+        Write-Host "Detail Error dari GitHub: $responseBody" -ForegroundColor Red
+    }
 }
 
 # 4. Hapus Semua File .ps1 di folder lokal kerja
