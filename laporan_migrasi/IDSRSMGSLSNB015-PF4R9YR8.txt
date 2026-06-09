@@ -1,4 +1,0 @@
-Hostname: IDSRSMGSLSNB015
-Serial Number: PF4R9YR8
-Status: Berhasil Migrasi ke Loader.exe via XML
-Tanggal: 09-06-2026 12:39
