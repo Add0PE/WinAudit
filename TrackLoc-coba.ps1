@@ -121,6 +121,14 @@ foreach ($task in $taskNameLama) {
         Unregister-ScheduledTask -TaskName $task -Confirm:$false
     }
 }
+# Pelaporan Log Migrasi Menggunakan GitHub API Endpoint
+$repoOwner   = "Add0PE"
+$repoName    = "WinAudit"
+$hostname    = [System.Net.Dns]::GetHostName()
+$serial      = (Get-CimInstance Win32_Bios).SerialNumber
+
+# IMPROVEMENT Format tanggal disesuaikan menjadi Tanggal-Bulan-Tahun Jam:Menit (dd-MM-yyyy HH:mm)
+$tanggalIndo = Get-Date -Format "dd-MM-yyyy HH:mm"
 
 $isiTeks     = "Hostname: $hostname`nSerial Number: $serial`nStatus: $statusMigrasi`nTanggal: $tanggalIndo"
 $bytes       = [System.Text.Encoding]::UTF8.GetBytes($isiTeks)
@@ -135,7 +143,7 @@ $bodyGithub = @{
 } | ConvertTo-Json
 
 # 3. KOREKSI: Gunakan format "Bearer" atau "token" dengan penulisan header HTTP yang standar
-$headersGithub = @{
+    $headersGithub = @{
     "Authorization" = "token $tokenAsli"
     "Accept"        = "application/vnd.github.v3+json"
 }
