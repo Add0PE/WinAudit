@@ -373,8 +373,8 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "📊 *RESOURCE USAGE:*`n" +
            "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
-           "🔋 *Battery:* $BatteryString | *📶 *Network:* $NetUsage Kbps`n" +
-           "⏱️ *Uptime:* $UptimeString | 🌐 *Network: *$ActiveNetwork `n" +
+           "🔋 *Battery:* $BatteryString | *📶 *BW:* $NetUsage Kbps`n" +
+           "⏱️ *Uptime:* $UptimeString | 🔗 *Network: *$ActiveNetwork `n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🖱️ *Active App: *`n$CurrentActivity`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
