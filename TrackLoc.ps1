@@ -310,6 +310,48 @@ try {
 
 } catch { $CurrentActivity = "• Debug Error: $($_.Exception.Message)" }
 
+# MODUL TAMBAHAN: DETEKSI JARINGAN AKTIF & NAMA SSID WIFI
+$ActiveNetwork = "Disconnected"
+try {
+    # Mengambil profil koneksi dasar (domain/router name)
+    $NetProfiles = Get-NetConnectionProfile -ErrorAction SilentlyContinue
+    $ConnectedProfile = $NetProfiles | Where-Object { $_.IPv4Connectivity -match "Internet|LocalNetwork" -or $_.IPv6Connectivity -match "Internet|LocalNetwork" } | Select-Object -First 1
+        
+    if ($ConnectedProfile) {
+        $BaseNetworkName = $ConnectedProfile.Name
+        $ActiveNetwork = $BaseNetworkName
+            
+        # Deteksi khusus untuk menarik nama fisik SSID jika menggunakan Wi-Fi
+        $WlanInfo = netsh wlan show interfaces 2>$null
+        $SSID = $null
+        if ($WlanInfo) {
+            foreach ($Line in $WlanInfo) {
+                # Mencari baris yang mengandung tepat kata "SSID :"
+                if ($Line -match '^\s*SSID\s*:\s*(.+)$') {
+                    $SSID = $Matches[1].Trim()
+                    break
+                }
+            }
+        }
+
+        # Format tampilan: Jika SSID ditemukan dan beda dengan nama Profil
+        if ($SSID -and $SSID -ne $BaseNetworkName) {
+            $ActiveNetwork = "$BaseNetworkName (SSID: $SSID)"
+        } 
+        # Format tampilan: Jika nama SSID dan Profil sama
+        elseif ($SSID -and $SSID -eq $BaseNetworkName) {
+            $ActiveNetwork = "Wi-Fi $SSID"
+        }
+
+        # Beri catatan khusus jika tidak ada akses internet
+        if ($ConnectedProfile.IPv4Connectivity -eq "LocalNetwork" -and $ConnectedProfile.IPv6Connectivity -ne "Internet") {
+            $ActiveNetwork += " [No Internet]"
+        }
+    }
+} catch { 
+    $ActiveNetwork = "Unknown Network"
+}
+
 # --- LOGIKA TAMPILAN LOKASI ---
 if (!$Location.IsUnknown) {
     $Lat = $Location.Latitude.ToString().Replace(",", ".")
@@ -332,7 +374,7 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "📊 *RESOURCE USAGE:*`n" +
            "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
            "🔋 *Battery:* $BatteryString | *📶 *Network:* $NetUsage Kbps`n" +
-           "⏱️ *Uptime:* $UptimeString`n" +
+           "⏱️ *Uptime:* $UptimeString | 🌐 *Network: *$ActiveNetwork `n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🖱️ *Active App: *`n$CurrentActivity`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
