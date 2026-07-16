@@ -45,13 +45,32 @@ try {
     $LastDefrag = if ($DefragLog) { $DefragLog.TimeCreated.ToString("dd MMM yyyy") } else { "N/A" }
 } catch { $LastDefrag = "N/A" }
 
-# C. Antivirus (Fix Date Format)
+# C. Antivirus (Fix Date Format & Robust Registry Version Detection)
 try {
     $AVQuery = Get-CimInstance -Namespace "root\SecurityCenter2" -Class "AntiVirusProduct" -ErrorAction SilentlyContinue
     $SelectedAV = $AVQuery | Where-Object { $_.displayName -like "*Kaspersky*" } | Select-Object -First 1
     
     if ($SelectedAV) {
         $AVName = $SelectedAV.displayName
+        
+        # --- Solusi: Ambil semua versi, konversi ke [version], ambil yang tertinggi ---
+        $RegPaths = @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*")
+        
+        # Ambil semua versi unik
+        $Versions = Get-ItemProperty $RegPaths -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.DisplayName -like "*Kaspersky*" -and $_.DisplayVersion } | 
+                    Select-Object -ExpandProperty DisplayVersion -Unique
+        
+        # Sortir menggunakan objek [version] agar 14.0.0.504 terdeteksi sebagai yang paling tinggi
+        $LatestVersion = $Versions | ForEach-Object { 
+            try { [version]$_ } catch { $null } 
+        } | Sort-Object -Descending | Select-Object -First 1
+        
+        if ($LatestVersion) {
+            $AVName = "$AVName (v$LatestVersion)"
+        }
+        # ----------------------------------------------------------------------------
+
         # Konversi format GMT/String ke dd MMM yyyy
         $RawTS = $SelectedAV.timestamp
         if ($RawTS -as [DateTime]) {
@@ -64,7 +83,8 @@ try {
         $LastAVUpdate = (Get-MpComputerStatus).AntivirusSignatureLastUpdated.ToString("dd MMM yyyy")
     }
 } catch { 
-    $AVName = "N/A"; $LastAVUpdate = "N/A" 
+    # Fallback yang lebih aman agar tidak N/A
+    $AVName = "Kaspersky (Status Unknown)"; $LastAVUpdate = "Check Logs" 
 }
 
 # D. Resource Usage
