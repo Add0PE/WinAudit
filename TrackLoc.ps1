@@ -94,22 +94,18 @@ $RAMUsage = [Math]::Round((($RAM.TotalVisibleMemorySize - $RAM.FreePhysicalMemor
 $DiskUsage = [Math]::Round((Get-Counter '\LogicalDisk(C:)\% Disk Time' -MaxSamples 1).CounterSamples.CookedValue, 1)
 if ($DiskUsage -gt 100) { $DiskUsage = 100 }
 
-# E. Battery (Improved Detection)
+# E. Battery (Improved Detection with Health & Cycle Count)
 try {
-    # Coba ambil data baterai dengan prioritas Win32_Battery
+    # 1. Ambil Persentase dan Status Baterai (Charging/Discharging)
     $Battery = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue
-    
     if ($Battery) {
         $Charge = $Battery.EstimatedChargeRemaining
-        # Jika nilai Charge kosong, coba ambil dari BatteryStatus (beberapa driver laptop berbeda)
         if ($null -eq $Charge) { 
             $Charge = (Get-WmiObject -Class BatteryStatus -Namespace root\wmi -ErrorAction SilentlyContinue).RemainingCapacity 
         }
-        
         $Status = if ($Battery.BatteryStatus -eq 2) { "🔌 Charging" } else { "🔋 Discharging" }
         $BatteryString = "$Charge% ($Status)"
     } else {
-        # Fallback kedua: Cek via WMI Power Management jika CIM gagal
         $WmiBat = Get-WmiObject -Class Win32_Battery -ErrorAction SilentlyContinue
         if ($WmiBat) {
             $Status = if ($WmiBat.BatteryStatus -eq 2) { "🔌 Charging" } else { "🔋 Discharging" }
@@ -118,8 +114,31 @@ try {
             $BatteryString = "Desktop (No Battery)"
         }
     }
+
+    # 2. Ambil Kesehatan Baterai (Battery Health) via XML Parsing
+    $BatteryHealthString = "N/A"
+    if ($BatteryString -notmatch "Desktop") {
+        $xmlPath = "$env:TEMP\bat_audit.xml"
+        powercfg /batteryreport /xml /output $xmlPath | Out-Null
+        
+        if (Test-Path $xmlPath) {
+            [xml]$xml = Get-Content $xmlPath
+            $Design = [double]$xml.BatteryReport.Batteries.Battery.DesignCapacity
+            $Full   = [double]$xml.BatteryReport.Batteries.Battery.FullChargeCapacity
+            $Cycle  = $xml.BatteryReport.Batteries.Battery.CycleCount
+            
+            Remove-Item $xmlPath -Force -ErrorAction SilentlyContinue
+            
+            if ($Design -gt 0 -and $Full -gt 0) {
+                $HealthPercent = [math]::Round(($Full / $Design) * 100, 1)
+                $CycleStr = if ($Cycle) { "$Cycle" } else { "N/A" }
+                $BatteryHealthString = "🩺 Health: $HealthPercent% | 🔄 Cycle: $CycleStr"
+            }
+        }
+    }
 } catch { 
-    $BatteryString = "Battery Error" 
+    $BatteryString = "Battery Error"
+    $BatteryHealthString = "N/A"
 }
 
 # F. Disk Report
@@ -393,8 +412,8 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "📊 *RESOURCE USAGE:*`n" +
            "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
-           "🔋 *Battery:* $BatteryString | *📶 *BW:* $NetUsage Kbps`n" +
-           "⏱️ *Uptime:* $UptimeString | 🔗 *Network: *$ActiveNetwork `n" +
+           "🔋 *Battery:* $BatteryString | $BatteryHealthString`n" +
+           "⏱️ *Uptime:* $UptimeString | 🔗 *Network: *$ActiveNetwork | *📶 *BW:* $NetUsage Kbps`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "🖱️ *Active App: *`n$CurrentActivity`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
@@ -413,5 +432,10 @@ $Message = "📍 *AUDIT DEVICE REPORT*`n" +
 # --- PENGIRIMAN ---
 try {
     $Payload = @{ chat_id = $TelegramChatID; text = $Message; parse_mode = "Markdown" }
-    Invoke-RestMethod -Uri "https://api.telegram.org/bot$($TelegramToken)/sendMessage" -Method Post -Body $Payload -TimeoutSec 10
-} catch {}
+    Invoke-RestMethod -Uri "https://api.telegram.org/bot$($TelegramToken)/sendMessage" -Method Post -Body $Payload -TimeoutSec 15
+    
+    Write-Host "✅ Berhasil mengirim laporan ke Telegram!" -ForegroundColor Green
+} catch {
+    Write-Host "❌ GAGAL MENGIRIM KE TELEGRAM!" -ForegroundColor Red
+    Write-Host "Pesan Error: $($_.Exception.Message)" -ForegroundColor Yellow
+}
