@@ -138,7 +138,6 @@ try {
     }
 } catch { 
     $BatteryString = "Battery Error"
-    $BatteryHealthString = "N/A"
 }
 
 # F. Disk Report
