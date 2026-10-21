@@ -391,22 +391,37 @@ try {
 }
 
 
-# FUNGSI DETEKSI AKTIVITAS USER (AKURAT UNTUK SYSTEM ACCOUNT)
+# FUNGSI DETEKSI AKTIVITAS USER (AKURAT UNTUK AKUN SYSTEM)
+
 $userStatus = "Online (Active)"
 $statusColor = "🟢"
 
 try {
-    # 1. Cek apakah Layar Terkunci (Windows Lock Screen aktif)
-    $isLocked = Get-Process -Name "logonui", "LockApp" -ErrorAction SilentlyContinue
+    # 1. Ambil ID Sesi Konsol yang sedang tampil di monitor user
+    $code = @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class Win32System {
+        [DllImport("kernel32.dll")]
+        public static extern uint WTSGetActiveConsoleSessionId();
+    }
+"@
+    if (-not ([System.Management.Automation.PSTypeName]'Win32System').Type) {
+        Add-Type -TypeDefinition $code -ErrorAction SilentlyContinue
+    }
+    $activeSessionId = [Win32System]::WTSGetActiveConsoleSessionId()
 
-    # 2. Cek apakah Screensaver sedang berjalan (proses berakhiran .scr)
+    # 2. Cek apakah 'logonui' berjalan KHUSUS pada Session ID aktif tersebut
+    # (LockApp sengaja DIBUANG karena selalu aktif di background Windows 10)
+    $isLocked = Get-Process -Name "logonui" -ErrorAction SilentlyContinue | 
+                Where-Object { $_.SessionId -eq $activeSessionId }
+
+    # 3. Cek Screensaver & Sesi Disconnected
     $isScreenSaver = Get-CimInstance Win32_Process -Filter "Name LIKE '%.scr'" -ErrorAction SilentlyContinue
-
-    # 3. Cek apakah Sesi User terputus (Sign out / Disconnected)
     $quser = quser.exe 2>$null
     $isDisconnected = ($quser -match "Disc|Putus")
 
-    # Logika Penentuan Status
+    # Penentuan Status Faktual
     if ($isLocked) {
         $userStatus = "AFK (Screen Locked)"
         $statusColor = "🟡"
