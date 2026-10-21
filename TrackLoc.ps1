@@ -391,64 +391,38 @@ try {
 }
 
 
-# FUNGSI DETEKSI AKTIVITAS USER (SUPPORT FOR SYSTEM ACCOUNT)
-function Get-UserIdleTimeSystem {
-    try {
-        # Menjalankan quser untuk melihat status sesi dari luar Session 0
-        $quser = quser.exe 2>$null
-        if (-not $quser) { return 9999 } 
-        
-        # Cari baris sesi yang statusnya Active (English) atau Aktif (Indonesian)
-        $activeLine = $quser | Where-Object { $_ -match 'Active' -or $_ -match 'Aktif' }
-        if (-not $activeLine) { return 9999 } # Jika layar terkunci (Locked)
-        
-        # Bersihkan spasi berlebih dan jadikan array
-        $parts = $activeLine.Trim() -replace '\s+', ',' -split ','
-        
-        # Temukan letak kata Active/Aktif, nilai idle time berada tepat setelahnya
-        $stateIndex = -1
-        for ($i = 0; $i -lt $parts.Length; $i++) {
-            if ($parts[$i] -match 'Active|Aktif') { $stateIndex = $i; break }
-        }
-        
-        if ($stateIndex -ge 0 -and ($stateIndex + 1) -lt $parts.Length) {
-            $idleStr = $parts[$stateIndex + 1]
-            
-            # 'none' atau '.' berarti user sedang memegang PC (0 menit)
-            if ($idleStr -match "none|tidak|kosong|\.") {
-                return 0
-            } elseif ($idleStr -match ":") {
-                # Jika format jam:menit (misal 1:30 = 90 menit)
-                $timeParts = $idleStr.Split(':')
-                return ([int]$timeParts[0] * 60) + [int]$timeParts[1]
-            } elseif ($idleStr -match "\+") {
-                # Format hari+jam (Sangat lama ditinggal)
-                return 9999 
-            } else {
-                # Format menit angka biasa
-                return [int]$idleStr
-            }
-        }
-        return 9999
-    } catch {
-        return 9999
-    }
-}
+# FUNGSI DETEKSI AKTIVITAS USER (AKURAT UNTUK SYSTEM ACCOUNT)
+$userStatus = "Online (Active)"
+$statusColor = "🟢"
 
-# Eksekusi fungsi penentu warna dan status
-$idleMinutes = Get-UserIdleTimeSystem
-$afkThresholdMinutes = 5 # Toleransi AFK 5 Menit
+try {
+    # 1. Cek apakah Layar Terkunci (Windows Lock Screen aktif)
+    $isLocked = Get-Process -Name "logonui", "LockApp" -ErrorAction SilentlyContinue
 
-if ($idleMinutes -ge $afkThresholdMinutes) {
-    if ($idleMinutes -eq 9999) {
-        $userStatus = "AFK / Screen Locked"
+    # 2. Cek apakah Screensaver sedang berjalan (proses berakhiran .scr)
+    $isScreenSaver = Get-CimInstance Win32_Process -Filter "Name LIKE '%.scr'" -ErrorAction SilentlyContinue
+
+    # 3. Cek apakah Sesi User terputus (Sign out / Disconnected)
+    $quser = quser.exe 2>$null
+    $isDisconnected = ($quser -match "Disc|Putus")
+
+    # Logika Penentuan Status
+    if ($isLocked) {
+        $userStatus = "AFK (Screen Locked)"
+        $statusColor = "🟡"
+    } elseif ($isScreenSaver) {
+        $userStatus = "AFK (Screensaver Active)"
+        $statusColor = "🟡"
+    } elseif ($isDisconnected) {
+        $userStatus = "AFK (Session Disconnected)"
+        $statusColor = "🟡"
     } else {
-        $userStatus = "AFK (Idle $idleMinutes Menit)"
+        $userStatus = "Online (Active)"
+        $statusColor = "🟢"
     }
-    $statusColor = "🟡"
-} else {
-    $userStatus = "Online (Active)"
-    $statusColor = "🟢"
+} catch {
+    $userStatus = "Status Unknown"
+    $statusColor = "⚪"
 }
 
 
