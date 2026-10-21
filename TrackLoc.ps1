@@ -390,6 +390,65 @@ try {
     $ActiveNetwork = "Unknown Network"
 }
 
+# FUNGSI DETEKSI AKTIVITAS USER (MOUSE & KEYBOARD)
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class Win32 {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct LASTINPUTINFO {
+        public uint cbSize;
+        public uint dwTime;
+    }
+
+    [DllImport("user32.dll")]
+    public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
+}
+"@
+
+function Get-UserIdleTime {
+    $lii = New-Object Win32+LASTINPUTINFO
+    $lii.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($lii)
+    
+    if ([Win32]::GetLastInputInfo([ref]$lii)) {
+        # Ambil waktu input terakhir & waktu sistem sekarang (dalam Milidetik)
+        $lastInputTick = $lii.dwTime
+        $currentTick = [Environment]::TickCount
+        
+        # Hitung selisihnya
+        $idleMs = $currentTick - $lastInputTick
+        return [TimeSpan]::FromMilliseconds($idleMs)
+    }
+    return [TimeSpan]::Zero
+}
+
+# MENENTUKAN STATUS (ONLINE vs AFK)
+$idleTime = Get-UserIdleTime
+$idleSeconds = $idleTime.TotalSeconds
+
+# Atur batas AFK (Contoh: 5 menit = 300 detik)
+$afkThresholdSeconds = 300 
+
+if ($idleSeconds -ge $afkThresholdSeconds) {
+    $minutesAFK = [math]::Round($idleTime.TotalMinutes)
+    $userStatus = "AFK (Idle $minutesAFK Menit)"
+    $statusColor = "🟡" # Kuning/Oranye untuk AFK
+} else {
+    $userStatus = "Online (Active)"
+    $statusColor = "🟢" # Hijau untuk Aktif
+}
+
+
+# FUNGSI DETEKSI VERSI OS & ARSITEKTUR
+
+$osData = Get-CimInstance Win32_OperatingSystem
+# Menghilangkan kata "Microsoft" agar teks lebih ringkas (opsional)
+$osName = $osData.Caption -replace "Microsoft ", "" 
+# Mengambil arsitektur (misal: "64-bit" atau "32-bit")
+$osArch = $osData.OSArchitecture 
+# Menggabungkan OS dan Arsitektur
+
 # --- LOGIKA TAMPILAN LOKASI ---
 if (!$Location.IsUnknown) {
     $Lat = $Location.Latitude.ToString().Replace(",", ".")
@@ -405,9 +464,9 @@ if (!$Location.IsUnknown) {
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
 $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
-           "💻 *Hostname:* $Hostname`n" +
-           "🔢 *Serial Number:* $SN`n" +
-           "👤 *User:* $User`n" +
+           "💻 *Hostname:* $Hostname | 🔢 *Serial Number:* $SN`n" +
+           "⊞ * OS:* $OSVersion`n" +
+           "👤 *User:* $User | 🚦 *Activity:* $statusColor$userStatus`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "📊 *RESOURCE USAGE:*`n" +
            "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
