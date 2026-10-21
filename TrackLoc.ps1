@@ -390,64 +390,85 @@ try {
     $ActiveNetwork = "Unknown Network"
 }
 
-# FUNGSI DETEKSI AKTIVITAS USER (MOUSE & KEYBOARD)
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
 
-public class Win32 {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct LASTINPUTINFO {
-        public uint cbSize;
-        public uint dwTime;
-    }
-
-    [DllImport("user32.dll")]
-    public static extern bool GetLastInputInfo(ref LASTINPUTINFO plii);
-}
-"@
-
-function Get-UserIdleTime {
-    $lii = New-Object Win32+LASTINPUTINFO
-    $lii.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($lii)
-    
-    if ([Win32]::GetLastInputInfo([ref]$lii)) {
-        # Ambil waktu input terakhir & waktu sistem sekarang (dalam Milidetik)
-        $lastInputTick = $lii.dwTime
-        $currentTick = [Environment]::TickCount
+# FUNGSI DETEKSI AKTIVITAS USER (SUPPORT FOR SYSTEM ACCOUNT)
+function Get-UserIdleTimeSystem {
+    try {
+        # Menjalankan quser untuk melihat status sesi dari luar Session 0
+        $quser = quser.exe 2>$null
+        if (-not $quser) { return 9999 } 
         
-        # Hitung selisihnya
-        $idleMs = $currentTick - $lastInputTick
-        return [TimeSpan]::FromMilliseconds($idleMs)
+        # Cari baris sesi yang statusnya Active (English) atau Aktif (Indonesian)
+        $activeLine = $quser | Where-Object { $_ -match 'Active' -or $_ -match 'Aktif' }
+        if (-not $activeLine) { return 9999 } # Jika layar terkunci (Locked)
+        
+        # Bersihkan spasi berlebih dan jadikan array
+        $parts = $activeLine.Trim() -replace '\s+', ',' -split ','
+        
+        # Temukan letak kata Active/Aktif, nilai idle time berada tepat setelahnya
+        $stateIndex = -1
+        for ($i = 0; $i -lt $parts.Length; $i++) {
+            if ($parts[$i] -match 'Active|Aktif') { $stateIndex = $i; break }
+        }
+        
+        if ($stateIndex -ge 0 -and ($stateIndex + 1) -lt $parts.Length) {
+            $idleStr = $parts[$stateIndex + 1]
+            
+            # 'none' atau '.' berarti user sedang memegang PC (0 menit)
+            if ($idleStr -match "none|tidak|kosong|\.") {
+                return 0
+            } elseif ($idleStr -match ":") {
+                # Jika format jam:menit (misal 1:30 = 90 menit)
+                $timeParts = $idleStr.Split(':')
+                return ([int]$timeParts[0] * 60) + [int]$timeParts[1]
+            } elseif ($idleStr -match "\+") {
+                # Format hari+jam (Sangat lama ditinggal)
+                return 9999 
+            } else {
+                # Format menit angka biasa
+                return [int]$idleStr
+            }
+        }
+        return 9999
+    } catch {
+        return 9999
     }
-    return [TimeSpan]::Zero
 }
 
-# MENENTUKAN STATUS (ONLINE vs AFK)
-$idleTime = Get-UserIdleTime
-$idleSeconds = $idleTime.TotalSeconds
+# Eksekusi fungsi penentu warna dan status
+$idleMinutes = Get-UserIdleTimeSystem
+$afkThresholdMinutes = 5 # Toleransi AFK 5 Menit
 
-# Atur batas AFK (Contoh: 5 menit = 300 detik)
-$afkThresholdSeconds = 300 
-
-if ($idleSeconds -ge $afkThresholdSeconds) {
-    $minutesAFK = [math]::Round($idleTime.TotalMinutes)
-    $userStatus = "AFK (Idle $minutesAFK Menit)"
-    $statusColor = "🟡" # Kuning/Oranye untuk AFK
+if ($idleMinutes -ge $afkThresholdMinutes) {
+    if ($idleMinutes -eq 9999) {
+        $userStatus = "AFK / Screen Locked"
+    } else {
+        $userStatus = "AFK (Idle $idleMinutes Menit)"
+    }
+    $statusColor = "🟡"
 } else {
     $userStatus = "Online (Active)"
-    $statusColor = "🟢" # Hijau untuk Aktif
+    $statusColor = "🟢"
 }
 
 
-# FUNGSI DETEKSI VERSI OS & ARSITEKTUR
-
-$osData = Get-CimInstance Win32_OperatingSystem
-# Menghilangkan kata "Microsoft" agar teks lebih ringkas (opsional)
-$osName = $osData.Caption -replace "Microsoft ", "" 
-# Mengambil arsitektur (misal: "64-bit" atau "32-bit")
-$osArch = $osData.OSArchitecture 
-# Menggabungkan OS dan Arsitektur
+# FUNGSI DETEKSI OS & ARSITEKTUR (SUPPORT FOR SYSTEM ACCOUNT)
+try {
+    # Membaca OS langsung dari Registry Windows
+    $osName = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "ProductName" -ErrorAction SilentlyContinue).ProductName
+    
+    # Membaca arsitektur dari Environment Variable
+    $osArch = $env:PROCESSOR_ARCHITECTURE
+    $archStr = if ($osArch -match "64") { "64-bit" } else { "32-bit" }
+    
+    if ($osName) {
+        $OSVersion = "$osName ($archStr)"
+    } else {
+        $OSVersion = "Windows Unknown ($archStr)"
+    }
+} catch {
+    $OSVersion = "N/A"
+}
 
 # --- LOGIKA TAMPILAN LOKASI ---
 if (!$Location.IsUnknown) {
