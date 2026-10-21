@@ -475,8 +475,8 @@ $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
 $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "💻 *Hostname:* $Hostname | 🔢 *SN:* $SN`n" +
-           "⊞ * OS:* $OSVersion`n" +
            "👤 *User:* $User | 🚦 *Activity:* $statusColor$userStatus`n" +
+           "⊞ * OS:* $OSVersion`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
            "📊 *RESOURCE USAGE:*`n" +
            "📟 *CPU:* $CPU % | *⚡ *RAM:* $RAMUsage % | *📁 *Disk:* $DiskUsage % | *🎨 *GPU:* $GPUUsage %`n" +
