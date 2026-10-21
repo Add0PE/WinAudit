@@ -459,7 +459,7 @@ if (!$Location.IsUnknown) {
 $Timestamp = Get-Date -Format "yyyy-MM-dd | HH:mm:ss"
 $Message = "📍 *AUDIT DEVICE REPORT*`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
-           "💻 *Hostname:* $Hostname | 🔢 *Serial Number:* $SN`n" +
+           "💻 *Hostname:* $Hostname | 🔢 *SN:* $SN`n" +
            "⊞ * OS:* $OSVersion`n" +
            "👤 *User:* $User | 🚦 *Activity:* $statusColor$userStatus`n" +
            "━━━━━━━━━━━━━━━━━━`n" +
