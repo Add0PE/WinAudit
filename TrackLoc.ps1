@@ -440,12 +440,17 @@ try {
     $statusColor = "⚪"
 }
 
-
-# FUNGSI DETEKSI OS & ARSITEKTUR (SUPPORT FOR SYSTEM ACCOUNT)
+# FUNGSI DETEKSI OS & ARSITEKTUR (SUPPORT SYSTEM ACCOUNT & WIN 11 FIX)
 try {
-    # Membaca OS langsung dari Registry Windows
-    $osName = (Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion" -Name "ProductName" -ErrorAction SilentlyContinue).ProductName
+    $regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+    $osName = (Get-ItemProperty -Path $regPath -Name "ProductName" -ErrorAction SilentlyContinue).ProductName
+    $buildNumber = (Get-ItemProperty -Path $regPath -Name "CurrentBuild" -ErrorAction SilentlyContinue).CurrentBuild
     
+    # Fix Registry Microsoft: Jika terbaca Win 10 tapi Build >= 22000, ubah ke Win 11
+    if ($osName -match "Windows 10" -and [int]$buildNumber -ge 22000) {
+        $osName = $osName -replace "Windows 10", "Windows 11"
+    }
+
     # Membaca arsitektur dari Environment Variable
     $osArch = $env:PROCESSOR_ARCHITECTURE
     $archStr = if ($osArch -match "64") { "64-bit" } else { "32-bit" }
